@@ -12,7 +12,10 @@ class PerformanceSurface(ControlSurface):
         log(self, "================================")
         log(self, f"Version {VERSION}")
         log(self, "Loaded")
-        log(self, "TEST 123456")
+        log(self, "MIDI Logger enabled")
+
+    def receive_midi(self, midi_bytes):
+        log(self, f"MIDI received: {midi_bytes}")
 
     def disconnect(self):
         log(self, "Disconnected")
