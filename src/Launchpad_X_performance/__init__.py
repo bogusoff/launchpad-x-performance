@@ -43,11 +43,18 @@ def _patched_create_mixer_modes(self):
 
     solo_button = self._elements.scene_launch_buttons_raw[6]
 
+    stop_button = self._elements.scene_launch_buttons_raw[4]
+
     def _on_solo_modifier_value(value):
         global PERFORMANCE_MODIFIER_PRESSED
         PERFORMANCE_MODIFIER_PRESSED = value > 0
 
+    def _on_stop_all_value(value):
+        if value > 0:
+            self.song.stop_all_clips()
+
     solo_button.add_value_listener(_on_solo_modifier_value)
+    stop_button.add_value_listener(_on_stop_all_value)
 
 
 Launchpad_X._create_mixer_modes = _patched_create_mixer_modes
