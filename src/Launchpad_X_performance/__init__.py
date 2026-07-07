@@ -12,6 +12,9 @@ from ableton.v2.control_surface.capabilities import (
 from ableton.v2.control_surface.components.clip_slot import ClipSlotComponent
 
 
+PERFORMANCE_MODIFIER_PRESSED = False
+
+
 _original_do_launch_clip = ClipSlotComponent._do_launch_clip
 
 
@@ -19,7 +22,7 @@ def _toggle_do_launch_clip(self, fire_state):
     if fire_state and self.has_clip():
         clip = self._clip_slot.clip
 
-        if clip.is_playing:
+        if clip.is_playing and not PERFORMANCE_MODIFIER_PRESSED:
             clip.stop()
             return
 
@@ -28,7 +31,26 @@ def _toggle_do_launch_clip(self, fire_state):
 
 ClipSlotComponent._do_launch_clip = _toggle_do_launch_clip
 
+
 from .launchpad_x import Launchpad_X
+
+
+_original_create_mixer_modes = Launchpad_X._create_mixer_modes
+
+
+def _patched_create_mixer_modes(self):
+    _original_create_mixer_modes(self)
+
+    solo_button = self._elements.scene_launch_buttons_raw[6]
+
+    def _on_solo_modifier_value(value):
+        global PERFORMANCE_MODIFIER_PRESSED
+        PERFORMANCE_MODIFIER_PRESSED = value > 0
+
+    solo_button.add_value_listener(_on_solo_modifier_value)
+
+
+Launchpad_X._create_mixer_modes = _patched_create_mixer_modes
 
 
 def get_capabilities():
