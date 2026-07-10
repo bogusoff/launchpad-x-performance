@@ -27,6 +27,12 @@ def _toggle_do_launch_clip(self, fire_state):
         if clip.is_playing:
             track = self._clip_slot.canonical_parent
             track.stop_all_clips()
+
+            button = self.launch_button.control_element
+
+            if button is not None:
+                button.set_light("Session.StopClipTriggered")
+
             return
 
     _original_do_launch_clip(self, fire_state)
