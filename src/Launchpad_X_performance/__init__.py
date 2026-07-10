@@ -25,7 +25,8 @@ def _toggle_do_launch_clip(self, fire_state):
         clip = self._clip_slot.clip
 
         if clip.is_playing:
-            clip.stop()
+            track = self._clip_slot.canonical_parent
+            track.stop_all_clips()
             return
 
     _original_do_launch_clip(self, fire_state)
