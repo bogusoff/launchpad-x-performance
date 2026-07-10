@@ -22,6 +22,33 @@ _original_do_launch_clip = ClipSlotComponent._do_launch_clip
 _original_do_launch_scene = SceneComponent._do_launch_scene
 
 
+def _belongs_to_performance_surface(component):
+    """
+    Проходим вверх по canonical_parent и проверяем,
+    принадлежит ли компонент нашему Remote Script.
+    """
+    current = component
+
+    for _ in range(20):
+        module_name = getattr(
+            getattr(current, "__class__", None),
+            "__module__",
+            "",
+        )
+
+        if module_name.startswith("Launchpad_X_performance"):
+            return True
+
+        parent = getattr(current, "canonical_parent", None)
+
+        if parent is None or parent is current:
+            break
+
+        current = parent
+
+    return False
+
+
 def _start_stop_indication(self, track, clip, button):
     previous_task = getattr(
         self,
@@ -75,6 +102,10 @@ def _start_stop_indication(self, track, clip, button):
 
 
 def _toggle_do_launch_clip(self, fire_state):
+    # Для официального Launchpad X оставляем родное поведение.
+    if not _belongs_to_performance_surface(self):
+        return _original_do_launch_clip(self, fire_state)
+
     if fire_state and self.has_clip():
         clip = self._clip_slot.clip
 
@@ -88,8 +119,8 @@ def _toggle_do_launch_clip(self, fire_state):
                 button.set_light("Session.StopClipTriggered")
                 _start_stop_indication(
                     self,
-                    track, 
-                    clip, 
+                    track,
+                    clip,
                     button,
                 )
 
@@ -99,6 +130,10 @@ def _toggle_do_launch_clip(self, fire_state):
 
 
 def _scene_restart_or_stop(self, value):
+    # Для официального Launchpad X оставляем родное поведение.
+    if not _belongs_to_performance_surface(self):
+        return _original_do_launch_scene(self, value)
+
     if not self._scene:
         return
 
@@ -107,7 +142,11 @@ def _scene_restart_or_stop(self, value):
         self._performance_scene_long_pressed = False
 
         def _mark_long_press():
-            if getattr(self, "_performance_scene_pressed", False):
+            if getattr(
+                self,
+                "_performance_scene_pressed",
+                False,
+            ):
                 self._performance_scene_long_pressed = True
 
                 for clip_slot in self._scene.clip_slots:
@@ -119,7 +158,11 @@ def _scene_restart_or_stop(self, value):
         )
 
     else:
-        if getattr(self, "_performance_scene_pressed", False):
+        if getattr(
+            self,
+            "_performance_scene_pressed",
+            False,
+        ):
             self._performance_scene_pressed = False
 
             if not getattr(
