@@ -17,8 +17,18 @@ from ableton.v2.control_surface.components.scene import SceneComponent
 LONG_PRESS_TICKS = 10
 STOP_INDICATION_REFRESH = 0.05
 
+CLIP_DELETE_HOLD_SECONDS = 2.0
+CLIP_DELETE_FLASH_REFRESH = 0.05
+CLIP_DELETE_FLASH_STEPS = 8
+
 
 _original_do_launch_clip = ClipSlotComponent._do_launch_clip
+_original_on_launch_button_pressed = (
+    ClipSlotComponent._on_launch_button_pressed
+)
+_original_on_launch_button_released = (
+    ClipSlotComponent._on_launch_button_released
+)
 _original_do_launch_scene = SceneComponent._do_launch_scene
 
 
@@ -43,6 +53,166 @@ def _belongs_to_performance_surface(component):
         current = parent
 
     return False
+
+
+def _track_is_armed(track):
+    return (
+        bool(getattr(track, "can_be_armed", False))
+        and bool(getattr(track, "arm", False))
+    )
+
+
+def _start_clip_delete_flash(self, button):
+    previous_task = getattr(
+        self,
+        "_performance_clip_delete_flash_task",
+        None,
+    )
+
+    if previous_task is not None:
+        previous_task.kill()
+
+    state = {
+        "remaining": CLIP_DELETE_FLASH_STEPS,
+    }
+    task_holder = {}
+
+    def _refresh_delete_flash():
+        flash_task = task_holder.get("task")
+
+        if state["remaining"] > 0:
+            button.set_light("Session.StopClipTriggered")
+            state["remaining"] -= 1
+            return
+
+        if flash_task is not None:
+            flash_task.kill()
+
+        self._performance_clip_delete_flash_task = None
+        self._update_launch_button_color()
+
+    button.set_light("Session.StopClipTriggered")
+
+    flash_task = self._tasks.add(
+        task.loop(
+            task.wait(CLIP_DELETE_FLASH_REFRESH),
+            task.run(_refresh_delete_flash),
+        )
+    )
+
+    task_holder["task"] = flash_task
+    self._performance_clip_delete_flash_task = flash_task
+
+
+def _start_clip_delete_hold(self):
+    previous_task = getattr(
+        self,
+        "_performance_clip_delete_hold_task",
+        None,
+    )
+
+    if previous_task is not None:
+        previous_task.kill()
+
+    clip = self._clip_slot.clip
+    clip_slot = self._clip_slot
+    button = self.launch_button.control_element
+
+    self._performance_clip_delete_pressed = True
+    self._performance_clip_delete_long_pressed = False
+
+    def _delete_clip_if_still_held():
+        if not getattr(
+            self,
+            "_performance_clip_delete_pressed",
+            False,
+        ):
+            return
+
+        same_slot = self._clip_slot == clip_slot
+        same_clip = self.has_clip() and self._clip_slot.clip == clip
+
+        if not same_slot or not same_clip:
+            return
+
+        track = self._clip_slot.canonical_parent
+
+        if not _track_is_armed(track):
+            return
+
+        self._performance_clip_delete_long_pressed = True
+
+        # Удаление выполняется немедленно и не зависит
+        # от глобальной квантизации.
+        self._do_delete_clip()
+
+        if button is not None:
+            _start_clip_delete_flash(self, button)
+
+    delete_task = self._tasks.add(
+        task.sequence(
+            task.wait(CLIP_DELETE_HOLD_SECONDS),
+            task.run(_delete_clip_if_still_held),
+        )
+    )
+
+    self._performance_clip_delete_hold_task = delete_task
+
+
+def _performance_on_launch_button_pressed(self):
+    if not _belongs_to_performance_surface(self):
+        return _original_on_launch_button_pressed(self)
+
+    if not self.has_clip():
+        return _original_on_launch_button_pressed(self)
+
+    track = self._clip_slot.canonical_parent
+
+    if not _track_is_armed(track):
+        return _original_on_launch_button_pressed(self)
+
+    # На вооружённой дорожке ждём отпускания или long press.
+    # Поэтому обычное действие пока не запускаем.
+    _start_clip_delete_hold(self)
+
+
+def _performance_on_launch_button_released(self):
+    if not _belongs_to_performance_surface(self):
+        return _original_on_launch_button_released(self)
+
+    if not getattr(
+        self,
+        "_performance_clip_delete_pressed",
+        False,
+    ):
+        return _original_on_launch_button_released(self)
+
+    self._performance_clip_delete_pressed = False
+
+    delete_task = getattr(
+        self,
+        "_performance_clip_delete_hold_task",
+        None,
+    )
+
+    if delete_task is not None:
+        delete_task.kill()
+
+    self._performance_clip_delete_hold_task = None
+
+    # После long press клип уже удалён — обычное действие
+    # по отпусканию выполнять нельзя.
+    if getattr(
+        self,
+        "_performance_clip_delete_long_pressed",
+        False,
+    ):
+        self._performance_clip_delete_long_pressed = False
+        return
+
+    # Короткое нажатие: выполняем штатный press/release.
+    _original_on_launch_button_pressed(self)
+    _original_on_launch_button_released(self)
 
 
 def _start_stop_indication(self, track, clip, button):
@@ -205,7 +375,6 @@ def _scene_restart_or_stop(self, value):
             self._performance_scene_long_pressed = True
             pending_clips = []
 
-            # Сохраняем активные clip pads этой строки.
             for clip_component in self._clip_slots:
                 if not clip_component.has_clip():
                     continue
@@ -222,12 +391,10 @@ def _scene_restart_or_stop(self, value):
                         (clip_component, clip, button)
                     )
 
-            # Ставим клипы этой сцены на остановку.
             for clip_slot in self._scene.clip_slots:
                 if clip_slot.has_clip:
                     clip_slot.stop()
 
-            # Подсвечиваем красным только остановленные clip pads.
             for clip_component, clip, button in pending_clips:
                 button.set_light("Session.StopClipTriggered")
 
@@ -260,6 +427,12 @@ def _scene_restart_or_stop(self, value):
 
 
 ClipSlotComponent._do_launch_clip = _toggle_do_launch_clip
+ClipSlotComponent._on_launch_button_pressed = (
+    _performance_on_launch_button_pressed
+)
+ClipSlotComponent._on_launch_button_released = (
+    _performance_on_launch_button_released
+)
 SceneComponent._do_launch_scene = _scene_restart_or_stop
 
 

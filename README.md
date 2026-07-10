@@ -39,6 +39,14 @@ This project extends the standard Launchpad X Remote Script with a workflow focu
 
 The original `Launchpad X` script remains available and can be selected at any time.
 
+## Uninstallation
+
+1. Double-click `uninstall.command`.
+2. Select your Ableton User Library.
+3. Restart Ableton Live.
+
+This removes only `Launchpad_X_performance`. The original Launchpad X Remote Script is not modified.
+
 ## Controls
 
 ### Clip pads
@@ -100,6 +108,14 @@ Performance-модификация для **Novation Launchpad X** под **Able
 6. Выберите DAW-вход и DAW-выход Launchpad X.
 
 Оригинальный `Launchpad X` остается доступен и может быть выбран в любой момент.
+
+## Удаление
+
+1. Запустите `uninstall.command`.
+2. Выберите папку Ableton User Library.
+3. Перезапустите Ableton Live.
+
+Удаляется только `Launchpad_X_performance`. Оригинальный Remote Script Launchpad X не изменяется.
 
 ## Управление
 
