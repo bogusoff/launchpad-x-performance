@@ -10,54 +10,57 @@ from ableton.v2.control_surface.capabilities import (
     outport,
 )
 from ableton.v2.control_surface.components.clip_slot import ClipSlotComponent
+from ableton.v2.control_surface.components.scene import SceneComponent
 
 
-PERFORMANCE_MODIFIER_PRESSED = False
+LONG_PRESS_TICKS = 10
 
 
 _original_do_launch_clip = ClipSlotComponent._do_launch_clip
+_original_do_launch_scene = SceneComponent._do_launch_scene
 
 
 def _toggle_do_launch_clip(self, fire_state):
     if fire_state and self.has_clip():
         clip = self._clip_slot.clip
 
-        if clip.is_playing and not PERFORMANCE_MODIFIER_PRESSED:
+        if clip.is_playing:
             clip.stop()
             return
 
     _original_do_launch_clip(self, fire_state)
 
 
+def _scene_restart_or_stop(self, value):
+    if not self._scene:
+        return
+
+    if value:
+        self._performance_scene_pressed = True
+        self._performance_scene_long_pressed = False
+
+        def _mark_long_press():
+            if getattr(self, "_performance_scene_pressed", False):
+                self._performance_scene_long_pressed = True
+                for clip_slot in self._scene.clip_slots:
+                    clip_slot.stop()
+
+        self.canonical_parent.schedule_message(LONG_PRESS_TICKS, _mark_long_press)
+
+    else:
+        if getattr(self, "_performance_scene_pressed", False):
+            self._performance_scene_pressed = False
+
+            if not getattr(self, "_performance_scene_long_pressed", False):
+                _original_do_launch_scene(self, True)
+                _original_do_launch_scene(self, False)
+
+
 ClipSlotComponent._do_launch_clip = _toggle_do_launch_clip
+SceneComponent._do_launch_scene = _scene_restart_or_stop
 
 
 from .launchpad_x import Launchpad_X
-
-
-_original_create_mixer_modes = Launchpad_X._create_mixer_modes
-
-
-def _patched_create_mixer_modes(self):
-    _original_create_mixer_modes(self)
-
-    solo_button = self._elements.scene_launch_buttons_raw[6]
-
-    stop_button = self._elements.scene_launch_buttons_raw[4]
-
-    def _on_solo_modifier_value(value):
-        global PERFORMANCE_MODIFIER_PRESSED
-        PERFORMANCE_MODIFIER_PRESSED = value > 0
-
-    def _on_stop_all_value(value):
-        if value > 0:
-            self.song.stop_all_clips()
-
-    solo_button.add_value_listener(_on_solo_modifier_value)
-    stop_button.add_value_listener(_on_stop_all_value)
-
-
-Launchpad_X._create_mixer_modes = _patched_create_mixer_modes
 
 
 def get_capabilities():
