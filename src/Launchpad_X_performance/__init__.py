@@ -23,10 +23,6 @@ _original_do_launch_scene = SceneComponent._do_launch_scene
 
 
 def _belongs_to_performance_surface(component):
-    """
-    Проходим вверх по canonical_parent и проверяем,
-    принадлежит ли компонент нашему Remote Script.
-    """
     current = component
 
     for _ in range(20):
@@ -101,8 +97,65 @@ def _start_stop_indication(self, track, clip, button):
     self._performance_stop_indication_task = indicator_task
 
 
+def _start_scene_clips_stop_indication(scene_component, pending_clips):
+    previous_task = getattr(
+        scene_component,
+        "_performance_scene_clips_stop_task",
+        None,
+    )
+
+    if previous_task is not None:
+        previous_task.kill()
+
+    task_holder = {}
+    pending_holder = {
+        "items": list(pending_clips),
+    }
+
+    def _refresh_scene_clips_stop_indication():
+        indicator_task = task_holder.get("task")
+        remaining_items = []
+
+        for clip_component, clip, button in pending_holder["items"]:
+            same_clip = (
+                clip_component.has_clip()
+                and clip_component._clip_slot.clip == clip
+            )
+
+            same_button = (
+                clip_component.launch_button.control_element == button
+            )
+
+            if same_clip and same_button and clip.is_playing:
+                button.set_light("Session.StopClipTriggered")
+                remaining_items.append(
+                    (clip_component, clip, button)
+                )
+            else:
+                clip_component._update_launch_button_color()
+
+        pending_holder["items"] = remaining_items
+
+        if remaining_items:
+            return
+
+        if indicator_task is not None:
+            indicator_task.kill()
+
+        scene_component._performance_scene_clips_stop_task = None
+
+    indicator_task = scene_component._tasks.add(
+        task.loop(
+            task.wait(STOP_INDICATION_REFRESH),
+            task.run(_refresh_scene_clips_stop_indication),
+        )
+    )
+
+    task_holder["task"] = indicator_task
+    scene_component._performance_scene_clips_stop_task = indicator_task
+
+
 def _toggle_do_launch_clip(self, fire_state):
-    # Для официального Launchpad X оставляем родное поведение.
     if not _belongs_to_performance_surface(self):
         return _original_do_launch_clip(self, fire_state)
 
@@ -117,6 +170,7 @@ def _toggle_do_launch_clip(self, fire_state):
 
             if button is not None:
                 button.set_light("Session.StopClipTriggered")
+
                 _start_stop_indication(
                     self,
                     track,
@@ -130,7 +184,6 @@ def _toggle_do_launch_clip(self, fire_state):
 
 
 def _scene_restart_or_stop(self, value):
-    # Для официального Launchpad X оставляем родное поведение.
     if not _belongs_to_performance_surface(self):
         return _original_do_launch_scene(self, value)
 
@@ -142,15 +195,47 @@ def _scene_restart_or_stop(self, value):
         self._performance_scene_long_pressed = False
 
         def _mark_long_press():
-            if getattr(
+            if not getattr(
                 self,
                 "_performance_scene_pressed",
                 False,
             ):
-                self._performance_scene_long_pressed = True
+                return
 
-                for clip_slot in self._scene.clip_slots:
+            self._performance_scene_long_pressed = True
+            pending_clips = []
+
+            # Сохраняем активные clip pads этой строки.
+            for clip_component in self._clip_slots:
+                if not clip_component.has_clip():
+                    continue
+
+                clip = clip_component._clip_slot.clip
+
+                if not clip.is_playing:
+                    continue
+
+                button = clip_component.launch_button.control_element
+
+                if button is not None:
+                    pending_clips.append(
+                        (clip_component, clip, button)
+                    )
+
+            # Ставим клипы этой сцены на остановку.
+            for clip_slot in self._scene.clip_slots:
+                if clip_slot.has_clip:
                     clip_slot.stop()
+
+            # Подсвечиваем красным только остановленные clip pads.
+            for clip_component, clip, button in pending_clips:
+                button.set_light("Session.StopClipTriggered")
+
+            if pending_clips:
+                _start_scene_clips_stop_indication(
+                    self,
+                    pending_clips,
+                )
 
         self.canonical_parent.schedule_message(
             LONG_PRESS_TICKS,
