@@ -1,6 +1,6 @@
-__pycache__/
-*.pyc
 .DS_Store
-backup/
-build/
-.vscode/settings.json
+**/.DS_Store
+__pycache__/
+*.py[cod]
+!src/Launchpad_X_performance/*.pyc
+*.log
