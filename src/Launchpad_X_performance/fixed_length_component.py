@@ -37,6 +37,21 @@ class PerformanceFixedLengthComponent(Component):
     def selected_bars(self):
         return self._selected_bars
 
+    @property
+    def record_length_beats(self):
+        if (
+            not self._fixed_length_enabled
+            or self._selected_bars <= 0
+        ):
+            return None
+
+        numerator = float(self.song.signature_numerator)
+        denominator = float(self.song.signature_denominator)
+
+        beats_per_bar = numerator * 4.0 / denominator
+
+        return self._selected_bars * beats_per_bar
+
     def _bars_for_button_index(self, index):
         # submatrix перечисляет сначала ряд 6, затем ряд 7.
         # Нам нужен обратный музыкальный порядок:

@@ -59,6 +59,32 @@ def _belongs_to_performance_surface(component):
     return False
 
 
+
+def _get_performance_surface(component):
+    current = component
+
+    for _ in range(30):
+        module_name = getattr(
+            getattr(current, "__class__", None),
+            "__module__",
+            "",
+        )
+
+        if (
+            module_name.startswith("Launchpad_X_performance")
+            and hasattr(current, "_performance_fixed_length")
+        ):
+            return current
+
+        parent = getattr(current, "canonical_parent", None)
+
+        if parent is None or parent is current:
+            break
+
+        current = parent
+
+    return None
+
 def _track_is_armed(track):
     return (
         bool(getattr(track, "can_be_armed", False))
@@ -332,6 +358,30 @@ def _start_scene_clips_stop_indication(scene_component, pending_clips):
 def _toggle_do_launch_clip(self, fire_state):
     if not _belongs_to_performance_surface(self):
         return _original_do_launch_clip(self, fire_state)
+
+    surface = _get_performance_surface(self)
+
+    # Fixed Length применяется только при запуске записи
+    # в пустом слоте на явно вооружённой дорожке.
+    if (
+        fire_state
+        and surface is not None
+        and not self.has_clip()
+    ):
+        track = self._clip_slot.canonical_parent
+        fixed_length = surface._performance_fixed_length
+
+        if (
+            _track_is_armed(track)
+            and fixed_length.fixed_length_enabled
+        ):
+            record_length = fixed_length.record_length_beats
+
+            if record_length is not None:
+                self._clip_slot.fire(
+                    record_length=record_length
+                )
+                return
 
     if fire_state and self.has_clip():
         clip = self._clip_slot.clip
