@@ -1,4 +1,5 @@
 from ableton.v2.base import task
+from ableton.v2.control_surface import Layer
 from ableton.v2.control_surface.capabilities import (
     CONTROLLER_ID_KEY,
     NOTES_CC,
@@ -12,6 +13,9 @@ from ableton.v2.control_surface.capabilities import (
 )
 from ableton.v2.control_surface.components.clip_slot import ClipSlotComponent
 from ableton.v2.control_surface.components.scene import SceneComponent
+
+from .fixed_length_component import PerformanceFixedLengthComponent
+from .fixed_length_manager import PerformanceFixedLengthManager
 
 
 LONG_PRESS_TICKS = 10
@@ -438,6 +442,36 @@ SceneComponent._do_launch_scene = _scene_restart_or_stop
 
 from .launchpad_x import Launchpad_X
 
+
+_original_create_components = Launchpad_X._create_components
+
+
+def _performance_create_components(self):
+    _original_create_components(self)
+
+    clip_matrix = self._elements.clip_launch_matrix
+
+    # Нижние два физических ряда исходной Session-матрицы.
+    fixed_length_matrix = clip_matrix.submatrix[
+        slice(None),
+        slice(6, 8),
+    ]
+
+    self._performance_fixed_length = PerformanceFixedLengthComponent(
+        name="Performance_Fixed_Length",
+        is_enabled=False,
+        layer=Layer(
+            length_buttons=fixed_length_matrix,
+        ),
+    )
+
+    self._performance_fixed_length_manager = PerformanceFixedLengthManager(
+        surface=self,
+        component=self._performance_fixed_length,
+    )
+
+
+Launchpad_X._create_components = _performance_create_components
 
 def get_capabilities():
     return {
