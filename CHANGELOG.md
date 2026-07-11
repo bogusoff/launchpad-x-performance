@@ -1,145 +1,123 @@
-# Changelog / История изменений
+# Changelog
 
 All notable changes to this project will be documented in this file.
 
-Все значимые изменения проекта документируются в этом файле.
-
 ---
 
-# v0.9.0
+# 🇷🇺 Русский
 
-## 🇬🇧 English
+## v1.0.0
 
-### Added
-
-- Toggle clip behavior (press a playing clip to stop it)
-- Quantized clip stop indication
-- Short press on Scene button → Restart Scene
-- Long press on Scene button → Stop Scene
-- Performance Mode isolated from the official Launchpad X Remote Script
-- Original Launchpad X remains fully functional
-
-## 🇷🇺 Русский
+Первый публичный релиз.
 
 ### Добавлено
 
-- Переключение клипа одним нажатием (повторное нажатие ставит клип на остановку)
-- Индикация квантованной остановки клипа
-- Короткое нажатие на кнопку сцены → перезапуск сцены
-- Долгое нажатие на кнопку сцены → остановка сцены
-- Performance Mode полностью изолирован от оригинального Launchpad X
-- Оригинальный Launchpad X продолжает работать без изменений
+- Quantized Clip Stop
+- Scene Stop (Long Press)
+- Clip Delete (Long Press на Arm-дорожках)
+- Fixed Length Recording (1–16 тактов)
+- Fixed Length Recording Overlay поверх Session View
+- Установщик для macOS
+- Установщик для Windows
+
+### Изменено
+
+- Оптимизирован рабочий процесс Launchpad X для живых выступлений.
+- Добавлено безопасное переключение между оригинальным Launchpad X и Launchpad X Performance.
+
+### Совместимость
+
+- Ableton Live 12
+- Novation Launchpad X
+- macOS
+- Windows 11
 
 ---
 
-# v0.8.0
+## История разработки
 
-## 🇬🇧 English
+### v0.9.4
 
-### Added
+- Добавлен движок Fixed Length Recording.
 
-- First implementation of quantized stop indication
+### v0.9.3
 
-## 🇷🇺 Русский
+- Добавлен Fixed Length Recording Overlay.
 
-### Добавлено
+### v0.9.2
 
-- Первая реализация индикации квантованной остановки
+- Добавлено удаление клипа долгим удержанием.
 
----
+### v0.9.1
 
-# v0.7.0
+- Подготовлена структура проекта.
+- Добавлена документация.
+- Добавлен установщик для macOS.
 
-## 🇬🇧 English
+### v0.9.0
 
-### Added
+- Добавлена индикация ожидающей остановки клипа.
 
-- Clip toggle
-- Scene short/long actions
+### v0.8.0
 
-## 🇷🇺 Русский
-
-### Добавлено
-
-- Переключение клипа
-- Короткое и долгое нажатие кнопки сцены
+- Добавлена квантованная остановка клипов.
 
 ---
 
-# v0.6.0
+# 🇬🇧 English
 
-## 🇬🇧 English
+## v1.0.0
+
+Initial public release.
 
 ### Added
 
-- Stop All Clips
+- Quantized Clip Stop
+- Scene Stop (Long Press)
+- Clip Delete (Long Press on armed tracks)
+- Fixed Length Recording (1–16 bars)
+- Fixed Length Recording Overlay inside Session View
+- macOS installer
+- Windows installer
 
-## 🇷🇺 Русский
+### Changed
 
-### Добавлено
+- Optimized Launchpad X workflow for live performance.
+- Added safe switching between the original Launchpad X and Launchpad X Performance.
 
-- Остановка всех клипов
+### Compatibility
+
+- Ableton Live 12
+- Novation Launchpad X
+- macOS
+- Windows 11
 
 ---
 
-# v0.5.0
+## Development History
 
-## 🇬🇧 English
+### v0.9.4
 
-### Added
+- Added Fixed Length Recording engine.
 
-- Solo modifier
+### v0.9.3
 
-## 🇷🇺 Русский
+- Added Fixed Length Recording Overlay.
 
-### Добавлено
+### v0.9.2
 
-- Модификатор Solo
+- Added long press clip deletion.
 
----
+### v0.9.1
 
-# v0.4.0
+- Prepared release structure.
+- Added documentation.
+- Added macOS installer.
 
-## 🇬🇧 English
+### v0.9.0
 
-### Added
+- Added clip stop indication.
 
-- Toggle Clip
+### v0.8.0
 
-## 🇷🇺 Русский
-
-### Добавлено
-
-- Переключение клипа
-
----
-
-# v0.3.0
-
-## 🇬🇧 English
-
-### Added
-
-- Official Launchpad X base
-
-## 🇷🇺 Русский
-
-### Добавлено
-
-- Основа на официальном Launchpad X Remote Script
-
----
-
-# v0.1.0
-
-## 🇬🇧 English
-
-### Added
-
-- Initial working control surface
-
-## 🇷🇺 Русский
-
-### Добавлено
-
-- Первая рабочая версия контроллера
+- Added quantized clip stop.

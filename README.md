@@ -1,150 +1,181 @@
 # Launchpad X Performance
 
-A performance-oriented Remote Script for Novation Launchpad X and Ableton Live 12.
-
-🇬🇧 English | 🇷🇺 Русский
-
----
-
-# 🇬🇧 English
-
-Performance modification for **Novation Launchpad X** designed for **Ableton Live 12**.
-
-This project extends the standard Launchpad X Remote Script with a workflow focused on live performance while preserving the original Launchpad behavior.
-
-## Features
-
-- Press a playing clip to stop it
-- Quantized clip stop indication
-- Scene button:
-  - Short press → Restart Scene
-  - Long press → Stop Scene
-- Original Launchpad X script remains untouched
-- One-click installation on macOS
-
-## Requirements
-
-- Ableton Live 12
-- Novation Launchpad X
-- macOS
-
-## Installation
-
-1. Download this repository.
-2. Double-click `install.command`.
-3. Restart Ableton Live.
-4. Open Ableton Live Preferences.
-5. Select `Launchpad_X_performance` as the Control Surface.
-6. Select the Launchpad X DAW input and output ports.
-
-The original `Launchpad X` script remains available and can be selected at any time.
-
-## Uninstallation
-
-1. Double-click `uninstall.command`.
-2. Select your Ableton User Library.
-3. Restart Ableton Live.
-
-This removes only `Launchpad_X_performance`. The original Launchpad X Remote Script is not modified.
-
-## Controls
-
-### Clip pads
-
-- Stopped clip → Launch clip
-- Playing clip → Quantized stop
-- While stop is pending → Pad blinks red
-
-### Scene buttons
-
-- Short press → Restart scene
-- Long press → Stop all clips in the scene
-
-## Notes
-
-This project uses the official Launchpad X Remote Script files as its base.
-
-The original Ableton Live installation is not modified.
-
-## Roadmap
-
-- Long press on clip → Delete Clip
-- Windows installer
-- Additional performance workflow improvements
-- More testing across Ableton Live 12 versions
+Performance and Live Looping Remote Script for **Novation Launchpad X** and **Ableton Live 12**.
 
 ---
 
 # 🇷🇺 Русский
 
-Performance-модификация для **Novation Launchpad X** под **Ableton Live 12**.
+## О проекте
 
-Проект расширяет стандартный Remote Script Launchpad X и добавляет функции, ориентированные на живые выступления, при этом сохраняя возможность использовать оригинальный Launchpad X.
+Launchpad X Performance — Remote Script для Novation Launchpad X, ориентированный на живые выступления и Live Looping в Ableton Live.
 
-## Возможности
+Проект не заменяет оригинальный Launchpad X Remote Script и не изменяет привычную логику работы контроллера. Вместо этого он добавляет ряд функций, ускоряющих наиболее востребованные действия во время выступления.
 
-- Повторное нажатие на играющий клип ставит его на остановку
-- Остановка выполняется с учетом Launch Quantization
-- Во время ожидания остановки pad мигает красным
-- Правая кнопка сцены:
-  - короткое нажатие → перезапуск сцены
-  - долгое нажатие → остановка сцены
-- Оригинальный Launchpad X остается доступен
-- Установка одним кликом на macOS
-
-## Требования
-
-- Ableton Live 12
-- Novation Launchpad X
-- macOS
-
-## Установка
-
-1. Скачайте репозиторий.
-2. Запустите `install.command`.
-3. Перезапустите Ableton Live.
-4. Откройте настройки Ableton Live.
-5. Выберите `Launchpad_X_performance` в качестве Control Surface.
-6. Выберите DAW-вход и DAW-выход Launchpad X.
-
-Оригинальный `Launchpad X` остается доступен и может быть выбран в любой момент.
-
-## Удаление
-
-1. Запустите `uninstall.command`.
-2. Выберите папку Ableton User Library.
-3. Перезапустите Ableton Live.
-
-Удаляется только `Launchpad_X_performance`. Оригинальный Remote Script Launchpad X не изменяется.
-
-## Управление
-
-### Кнопки клипов
-
-- Остановленный клип → запуск
-- Играющий клип → квантованная остановка
-- Пока ожидается остановка → кнопка мигает красным
-
-### Кнопки сцен
-
-- Короткое нажатие → перезапуск сцены
-- Долгое нажатие → остановка всех клипов сцены
-
-## Примечания
-
-Проект использует официальные файлы Remote Script Launchpad X как основу.
-
-Оригинальная установка Ableton Live не изменяется.
-
-## Планы
-
-- Долгое нажатие на клип → удаление клипа
-- Установщик для Windows
-- Дополнительные функции для живых выступлений
-- Тестирование на разных версиях Ableton Live 12
+Все изменения работают только при выборе **Launchpad_X_performance** в качестве Control Surface. В любой момент можно вернуться к стандартному Launchpad X.
 
 ---
 
-## License
+## Возможности
 
-MIT License
+- ✅ Quantized Clip Stop (повторное нажатие на играющий клип)
+- ✅ Scene Stop (долгое удержание кнопки сцены)
+- ✅ Clip Delete (долгое удержание клипа на Arm-дорожках)
+- ✅ Fixed Length Recording (1–16 тактов)
+- ✅ Fixed Length Recording Overlay поверх Session View
+- ✅ Безопасное переключение между оригинальным Launchpad X и Launchpad X Performance
+- ✅ Поддержка macOS
+- ✅ Поддержка Windows
+
+---
+
+## Совместимость
+
+| Платформа | Статус |
+|-----------|--------|
+| Ableton Live 12 | ✅ |
+| macOS | ✅ |
+| Windows 11 | ✅ |
+| Novation Launchpad X | ✅ |
+
+---
+
+## Установка
+
+### macOS
+
+Запустите:
+
+```text
+install.command
+```
+
+### Windows
+
+Запустите:
+
+```text
+install_windows.bat
+```
+
+После установки выберите:
+
+```text
+Control Surface:
+Launchpad_X_performance
+```
+
+---
+
+## Демонстрация
+
+📹 Demo Video *(будет добавлено после публикации)*
+
+🖼 GIF — Quantized Clip Stop *(будет добавлено)*
+
+🖼 GIF — Fixed Length Recording *(будет добавлено)*
+
+🖼 GIF — Clip Delete *(будет добавлено)*
+
+🖼 GIF — Scene Stop *(будет добавлено)*
+
+---
+
+## Разработка проекта
+
+Launchpad X Performance создавался для решения моих собственных задач во время живых выступлений.
+
+На данный момент проект считается функционально завершённым.
+
+Новые версии будут выпускаться только в случае необходимости поддержки новых версий Ableton Live, исправления ошибок или появления новых функций, которые потребуются в реальном использовании.
+
+Проект распространяется по лицензии MIT. Вы можете свободно использовать, изменять и развивать его самостоятельно.
+
+---
+
+# 🇬🇧 English
+
+## About
+
+Launchpad X Performance is a performance and live looping Remote Script for Novation Launchpad X and Ableton Live.
+
+It does not replace the original Launchpad X Remote Script or change the familiar controller workflow. Instead, it adds a set of features that make the most common performance actions faster and more convenient.
+
+All features are active only when **Launchpad_X_performance** is selected as the Control Surface. You can switch back to the original Launchpad X at any time.
+
+---
+
+## Features
+
+- ✅ Quantized Clip Stop (press a playing clip again to stop)
+- ✅ Scene Stop (Long Press)
+- ✅ Clip Delete (Long Press on armed tracks)
+- ✅ Fixed Length Recording (1–16 bars)
+- ✅ Fixed Length Recording Overlay inside Session View
+- ✅ Safe switching between the original Launchpad X and Launchpad X Performance
+- ✅ macOS support
+- ✅ Windows support
+
+---
+
+## Compatibility
+
+| Platform | Status |
+|----------|--------|
+| Ableton Live 12 | ✅ |
+| macOS | ✅ |
+| Windows 11 | ✅ |
+| Novation Launchpad X | ✅ |
+
+---
+
+## Installation
+
+### macOS
+
+Run:
+
+```text
+install.command
+```
+
+### Windows
+
+Run:
+
+```text
+install_windows.bat
+```
+
+Then select:
+
+```text
+Control Surface:
+Launchpad_X_performance
+```
+
+---
+
+## Demo
+
+📹 Demo Video *(coming soon)*
+
+🖼 GIF — Quantized Clip Stop *(coming soon)*
+
+🖼 GIF — Fixed Length Recording *(coming soon)*
+
+🖼 GIF — Clip Delete *(coming soon)*
+
+🖼 GIF — Scene Stop *(coming soon)*
+
+---
+
+## Project Status
+
+Launchpad X Performance was created to improve my own live performance workflow.
+
+The project is currently considered feature complete.
+
+Future releases will only be made to maintain compatibility with future Ableton Live versions, fix bugs or introduce features required during real-world use.
+
+The project is released under the MIT License. You are free to use, modify and extend it for your own needs.
