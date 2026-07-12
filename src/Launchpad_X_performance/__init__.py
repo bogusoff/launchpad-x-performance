@@ -18,10 +18,18 @@ from .fixed_length_component import PerformanceFixedLengthComponent
 from .fixed_length_manager import PerformanceFixedLengthManager
 
 
-LONG_PRESS_TICKS = 10
-STOP_INDICATION_REFRESH = 0.05
+# Long-press timing, in seconds.
+#
+# Increase these values if Scene Stop or Clip Delete trigger too easily.
+# Decrease them for faster live-performance access.
+#
+# Recommended range: 0.5–2.0 seconds.
+SCENE_HOLD_SECONDS = 0.7
+CLIP_DELETE_HOLD_SECONDS = 0.7
 
-CLIP_DELETE_HOLD_SECONDS = 2.0
+# LED indication refresh intervals and delete flash duration.
+# These normally do not need to be changed.
+STOP_INDICATION_REFRESH = 0.05
 CLIP_DELETE_FLASH_REFRESH = 0.05
 CLIP_DELETE_FLASH_STEPS = 8
 
@@ -415,10 +423,19 @@ def _scene_restart_or_stop(self, value):
         return
 
     if value:
+        previous_task = getattr(
+            self,
+            "_performance_scene_hold_task",
+            None,
+        )
+
+        if previous_task is not None:
+            previous_task.kill()
+
         self._performance_scene_pressed = True
         self._performance_scene_long_pressed = False
 
-        def _mark_long_press():
+        def _stop_scene_if_still_held():
             if not getattr(
                 self,
                 "_performance_scene_pressed",
@@ -430,10 +447,18 @@ def _scene_restart_or_stop(self, value):
             pending_clips = []
 
             for clip_component in self._clip_slots:
-                if not clip_component.has_clip():
+                clip_slot = getattr(
+                    clip_component,
+                    "_clip_slot",
+                    None,
+                )
+
+                # За пределами текущего Session Ring компонент может
+                # временно не иметь назначенного ClipSlot.
+                if clip_slot is None or not clip_slot.has_clip:
                     continue
 
-                clip = clip_component._clip_slot.clip
+                clip = clip_slot.clip
 
                 if not clip.is_playing:
                     continue
@@ -445,11 +470,18 @@ def _scene_restart_or_stop(self, value):
                         (clip_component, clip, button)
                     )
 
-            for clip_slot in self._scene.clip_slots:
-                if clip_slot.has_clip:
-                    clip_slot.stop()
+            # Останавливаем только дорожки, на которых сейчас играет
+            # клип именно из удерживаемой сцены. Track Stop использует
+            # штатную Global Quantization Ableton Live.
+            stopped_tracks = set()
 
             for clip_component, clip, button in pending_clips:
+                track = clip_component._clip_slot.canonical_parent
+
+                if track not in stopped_tracks:
+                    track.stop_all_clips()
+                    stopped_tracks.add(track)
+
                 button.set_light("Session.StopClipTriggered")
 
             if pending_clips:
@@ -458,26 +490,49 @@ def _scene_restart_or_stop(self, value):
                     pending_clips,
                 )
 
-        self.canonical_parent.schedule_message(
-            LONG_PRESS_TICKS,
-            _mark_long_press,
+        hold_task = self._tasks.add(
+            task.sequence(
+                task.wait(SCENE_HOLD_SECONDS),
+                task.run(_stop_scene_if_still_held),
+            )
         )
 
+        self._performance_scene_hold_task = hold_task
+
     else:
-        if getattr(
+        if not getattr(
             self,
             "_performance_scene_pressed",
             False,
         ):
-            self._performance_scene_pressed = False
+            return
 
-            if not getattr(
-                self,
-                "_performance_scene_long_pressed",
-                False,
-            ):
-                _original_do_launch_scene(self, True)
-                _original_do_launch_scene(self, False)
+        self._performance_scene_pressed = False
+
+        hold_task = getattr(
+            self,
+            "_performance_scene_hold_task",
+            None,
+        )
+
+        if hold_task is not None:
+            hold_task.kill()
+
+        self._performance_scene_hold_task = None
+
+        # После long press остановка уже поставлена в очередь.
+        # Короткий запуск сцены по отпусканию выполнять нельзя.
+        if getattr(
+            self,
+            "_performance_scene_long_pressed",
+            False,
+        ):
+            self._performance_scene_long_pressed = False
+            return
+
+        # Короткое нажатие сохраняет штатный запуск сцены.
+        _original_do_launch_scene(self, True)
+        _original_do_launch_scene(self, False)
 
 
 ClipSlotComponent._do_launch_clip = _toggle_do_launch_clip
