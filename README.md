@@ -38,17 +38,7 @@ You can switch back to the official `Launchpad X` script at any time.
 
 ## 🎥 Демонстрация / Demo
 
-### 🇷🇺
-
-Полное демонстрационное видео будет добавлено после публикации.
-
-> **Видео: скоро будет добавлено**
-
-### 🇬🇧
-
-A full demonstration video will be added after publication.
-
-> **Video: coming soon**
+https://youtu.be/iwC-g0I7ADQ?si=ZVzq5mLxWfpZIt2y
 
 ---
 
