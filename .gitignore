@@ -5,3 +5,10 @@ __pycache__/
 !src/Launchpad_X_performance/*.pyc
 *.log
 dist/
+# Local development files
+backups/
+patch_*.command
+fix_*.command
+repair_*.command
+full_repair_*.command
+install_arm_*.command
