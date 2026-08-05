@@ -15,9 +15,8 @@ class PerformanceFixedLengthComponent(Component):
     Выбор фиксированной длины записи от 1 до 16 тактов.
 
     Физический порядок:
-    - верхний ряд: 1–8;
-    - ряд под ним: 9–16;
-    - нижний ряд Launchpad: штатный Arm дорожек.
+    - нижний ряд: 1–8;
+    - ряд над ним: 9–16.
     """
 
     length_buttons = control_list(
@@ -54,11 +53,13 @@ class PerformanceFixedLengthComponent(Component):
         return self._selected_bars * beats_per_bar
 
     def _bars_for_button_index(self, index):
-        # submatrix перечисляет сначала верхний ряд,
-        # затем расположенный под ним ряд:
-        # верхний ряд = 1–8;
-        # следующий ряд = 9–16.
-        return index + 1
+        # submatrix перечисляет сначала ряд 6, затем ряд 7.
+        # Нам нужен обратный музыкальный порядок:
+        # ряд 7 = 1–8, ряд 6 = 9–16.
+        if index < 8:
+            return index + 9
+
+        return index - 7
 
     @length_buttons.pressed
     def length_buttons(self, button):

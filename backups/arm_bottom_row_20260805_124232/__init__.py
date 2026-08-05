@@ -556,11 +556,10 @@ def _performance_create_components(self):
 
     clip_matrix = self._elements.clip_launch_matrix
 
-    # Физические ряды 6 и 7 используются для Fixed Length.
-    # Нижний физический ряд 8 остаётся штатным Arm дорожек.
+    # Нижние два физических ряда исходной Session-матрицы.
     fixed_length_matrix = clip_matrix.submatrix[
         slice(None),
-        slice(5, 7),
+        slice(6, 8),
     ]
 
     self._performance_fixed_length = PerformanceFixedLengthComponent(

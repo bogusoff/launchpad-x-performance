@@ -5,13 +5,12 @@ class PerformanceFixedLengthManager(object):
     """
     Следит за штатными режимами Launchpad X.
 
-    Fixed Length включён только при:
+    Overlay включён только при:
     Main Mode = Session
     Session Mode = Mixer
-    Mixer Mode = Arm
+    Mixer Mode = Pan
 
-    Два ряда используются для выбора длины записи.
-    Нижний ряд продолжает управлять Arm дорожек.
+    Штатные Pan-фейдеры при этом отключаются.
     """
 
     def __init__(self, surface, component):
@@ -37,15 +36,19 @@ class PerformanceFixedLengthManager(object):
         return (
             self._surface._main_modes.selected_mode == "session"
             and self._surface._session_modes.selected_mode == "mixer"
-            and self._surface._mixer_modes.selected_mode == "arm"
+            and self._surface._mixer_modes.selected_mode == "pan"
         )
 
     def _refresh(self):
         overlay_enabled = self._overlay_should_be_enabled()
 
         if overlay_enabled:
-            # Возвращаем сетку из возможного Faders layout
-            # в обычный Session layout.
+            # Режим Pan уже успел захватить фейдеры.
+            # Освобождаем их, чтобы нажатия не меняли панораму.
+            self._surface._mixer.set_pan_controls(None)
+            self._surface._mixer.set_track_color_controls(None)
+
+            # Возвращаем сетку из Faders layout в Session layout.
             self._surface._session_layout_mode()
 
         self._component.set_enabled(overlay_enabled)
