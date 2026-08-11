@@ -241,14 +241,14 @@ A comfortable range is usually:
 
 ### 🇷🇺
 
-Версия `v1.1.0` протестирована на:
+Версия `v1.1.1` протестирована на:
 
 - Ableton Live 12.4.2 — macOS;
 - Ableton Live 12.4.1 — Windows 11 25H2.
 
 ### 🇬🇧
 
-Version `v1.1.0` has been tested with:
+Version `v1.1.1` has been tested with:
 
 - Ableton Live 12.4.2 on macOS;
 - Ableton Live 12.4.1 on Windows 11 25H2.

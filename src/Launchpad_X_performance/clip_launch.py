@@ -2,6 +2,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from ableton.v2.control_surface.components.clip_slot import ClipSlotComponent
 
+from .clip_launch_pending import handle_queued_launch, swallow_pending_launch_release
 from .clip_stop import handle_clip_stop
 
 
@@ -46,8 +47,9 @@ def performance_do_launch_clip(self, fire_state):
 
     Порядок:
     1. Fixed Length-запись пустого слота по логике Novation.
-    2. Квантованный Stop уже играющего клипа.
-    3. Всё остальное — штатный ClipSlotComponent.
+    2. Собственный queued launch остановленного клипа.
+    3. Квантованный Stop уже играющего клипа.
+    4. Всё остальное — штатный ClipSlotComponent.
     """
     surface = _get_performance_surface(self)
 
@@ -62,7 +64,22 @@ def performance_do_launch_clip(self, fire_state):
             recording.start_recording_in_slot(slot)
             return
 
-    if handle_clip_stop(self, fire_state):
+    if swallow_pending_launch_release(
+        self,
+        fire_state,
+    ):
+        return
+
+    if handle_queued_launch(
+        self,
+        fire_state,
+    ):
+        return
+
+    if handle_clip_stop(
+        self,
+        fire_state,
+    ):
         return
 
     return _original_do_launch_clip(self, fire_state)

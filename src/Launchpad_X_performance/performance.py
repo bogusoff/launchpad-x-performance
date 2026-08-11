@@ -1,9 +1,11 @@
 from __future__ import absolute_import, print_function, unicode_literals
 from ableton.v2.control_surface import Layer
+from .clip_delete import install_clip_delete
 from .clip_launch import install_clip_launch
 from .fixed_length import PerformanceFixedLengthComponent, PerformanceFixedLengthRecording, PerformanceFixedLengthSetting
 from .fixed_length_manager import PerformanceFixedLengthManager
 from .launchpad_x import Launchpad_X
+from .scene_stop import install_scene_stop
 
 class Launchpad_X_Performance(Launchpad_X):
     def _create_components(self):
@@ -28,3 +30,5 @@ class Launchpad_X_Performance(Launchpad_X):
         )
 
 install_clip_launch()
+install_clip_delete()
+install_scene_stop()

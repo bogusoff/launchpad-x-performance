@@ -6,6 +6,20 @@ All notable changes to this project will be documented in this file.
 
 # 🇷🇺 Русский
 
+## v1.1.1
+
+Patch release.
+
+### Исправлено
+
+- Восстановлена отмена queued clip launch повторным нажатием.
+- Восстановлена отмена queued clip stop повторным нажатием.
+- Fixed Length теперь корректно выставляет playback/loop region после записи.
+- Scene Stop теперь использует общий pending-stop механизм, поэтому отдельные остановки можно отменять clip pads.
+- Восстановлено удаление клипа долгим удержанием на явно вооружённой дорожке.
+
+---
+
 ## v1.0.0
 
 Первый публичный релиз.
@@ -65,6 +79,20 @@ All notable changes to this project will be documented in this file.
 ---
 
 # 🇬🇧 English
+
+## v1.1.1
+
+Patch release.
+
+### Fixed
+
+- Restored queued clip launch cancellation with a second press.
+- Restored queued clip stop cancellation with a second press.
+- Fixed Length now normalizes the playback/loop region after recording.
+- Scene Stop now uses the shared pending-stop mechanism, so individual stops can be cancelled from clip pads.
+- Restored long-press clip deletion on explicitly armed tracks.
+
+---
 
 ## v1.0.0
 
