@@ -38,28 +38,50 @@ echo
 echo "2) Select another User Library folder"
 echo
 
-read -r -p "Enter 1 or 2 [1]: " choice
-choice="${choice:-1}"
+USER_LIBRARY=""
 
-case "$choice" in
-    1)
-        USER_LIBRARY="$STANDARD_LIBRARY"
-        ;;
-    2)
-        USER_LIBRARY="$(choose_user_library)"
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --user-library)
+            if [ "$#" -lt 2 ]; then
+                echo "Error: --user-library requires a path."
+                exit 1
+            fi
 
-        if [ -z "$USER_LIBRARY" ]; then
-            echo "Installation cancelled."
+            USER_LIBRARY="${2%/}"
+            shift 2
+            ;;
+        *)
+            echo "Error: unknown argument: $1"
             exit 1
-        fi
+            ;;
+    esac
+done
 
-        USER_LIBRARY="${USER_LIBRARY%/}"
-        ;;
-    *)
-        echo "Error: enter 1 or 2."
-        exit 1
-        ;;
-esac
+if [ -z "$USER_LIBRARY" ]; then
+    read -r -p "Enter 1 or 2 [1]: " choice
+    choice="${choice:-1}"
+
+    case "$choice" in
+        1)
+            USER_LIBRARY="$STANDARD_LIBRARY"
+            ;;
+        2)
+            USER_LIBRARY="$(choose_user_library)"
+
+            if [ -z "$USER_LIBRARY" ]; then
+                echo "Installation cancelled."
+                exit 1
+            fi
+
+            USER_LIBRARY="${USER_LIBRARY%/}"
+            ;;
+        *)
+            echo "Error: enter 1 or 2."
+            exit 1
+            ;;
+    esac
+fi
 
 REMOTE_SCRIPTS_DIR="$USER_LIBRARY/Remote Scripts"
 DESTINATION="$REMOTE_SCRIPTS_DIR/$SCRIPT_NAME"

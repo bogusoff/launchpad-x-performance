@@ -1,7 +1,11 @@
 from __future__ import absolute_import, print_function, unicode_literals
+
 from ableton.v2.control_surface import Layer
+
 from .clip_delete import install_clip_delete
 from .clip_launch import install_clip_launch
+from .drum_bridge import LPXDrumBridgeManager
+from .drum_mode_layout import DrumModeLayoutManager, StaticDrumModeLayoutComponent
 from .fixed_length import PerformanceFixedLengthComponent, PerformanceFixedLengthRecording, PerformanceFixedLengthSetting
 from .fixed_length_manager import PerformanceFixedLengthManager
 from .launchpad_x import Launchpad_X
@@ -27,6 +31,17 @@ class Launchpad_X_Performance(Launchpad_X):
         self._performance_fixed_length_manager = PerformanceFixedLengthManager(
             surface=self,
             component=self._performance_fixed_length,
+        )
+        self._performance_drum_bridge = LPXDrumBridgeManager(surface=self)
+        self._performance_drum_mode_layout = StaticDrumModeLayoutComponent(
+            name="Performance_Drum_Mode_Static_Layout",
+            drum_bridge_manager=self._performance_drum_bridge,
+            is_enabled=False,
+            layer=Layer(matrix=clip_matrix),
+        )
+        self._performance_drum_mode_layout_manager = DrumModeLayoutManager(
+            surface=self,
+            component=self._performance_drum_mode_layout,
         )
 
 install_clip_launch()
