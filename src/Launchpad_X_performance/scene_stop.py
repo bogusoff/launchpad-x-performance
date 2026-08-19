@@ -36,6 +36,26 @@ def _belongs_to_performance_surface(component):
     return False
 
 
+def queue_scene_stop(scene_component):
+    queued_clips = 0
+
+    for clip_component in scene_component._clip_slots:
+        clip_slot = getattr(clip_component, "_clip_slot", None)
+
+        if not liveobj_valid(clip_slot) or not clip_component.has_clip():
+            continue
+
+        clip = clip_slot.clip
+
+        if not clip.is_playing:
+            continue
+
+        if queue_clip_stop(clip_component):
+            queued_clips += 1
+
+    return queued_clips
+
+
 def _scene_restart_or_stop(self, value):
     if not _belongs_to_performance_surface(self):
         return _original_do_launch_scene(self, value)
@@ -61,19 +81,7 @@ def _scene_restart_or_stop(self, value):
                 return
 
             self._performance_scene_long_pressed = True
-
-            for clip_component in self._clip_slots:
-                clip_slot = getattr(clip_component, "_clip_slot", None)
-
-                if not liveobj_valid(clip_slot) or not clip_component.has_clip():
-                    continue
-
-                clip = clip_slot.clip
-
-                if not clip.is_playing:
-                    continue
-
-                queue_clip_stop(clip_component)
+            queue_scene_stop(self)
 
         hold_task = self._tasks.add(
             task.sequence(

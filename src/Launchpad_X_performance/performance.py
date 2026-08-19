@@ -9,6 +9,7 @@ from .drum_mode_layout import DrumModeLayoutManager, StaticDrumModeLayoutCompone
 from .fixed_length import PerformanceFixedLengthComponent, PerformanceFixedLengthRecording, PerformanceFixedLengthSetting
 from .fixed_length_manager import PerformanceFixedLengthManager
 from .launchpad_x import Launchpad_X
+from .mixer_stop import install_mixer_side_stop
 from .scene_stop import install_scene_stop
 
 class Launchpad_X_Performance(Launchpad_X):
@@ -55,3 +56,4 @@ class Launchpad_X_Performance(Launchpad_X):
 install_clip_launch()
 install_clip_delete()
 install_scene_stop()
+install_mixer_side_stop()
