@@ -3,6 +3,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 import Live
 from ableton.v2.base import liveobj_valid, task
 from ableton.v2.control_surface import Component
+from ableton.v2.control_surface.input_control_element import ScriptForwarding
 from ableton.v2.control_surface.components.clip_slot import find_nearest_color
 from ableton.v2.control_surface.elements import Color
 from novation.colors import Blink, CLIP_COLOR_TABLE, RGB_COLOR_TABLE, Rgb
@@ -27,6 +28,7 @@ BAR_SELECTED_COLOR = Color(Rgb.GREEN.midi_value)
 DRUM_PLAYBACK_COLOR = Color(Rgb.YELLOW.midi_value)
 OFF_COLOR = Color(0)
 DRUM_BASE_NOTE = 36
+DRUM_NATIVE_CHANNEL = 9
 DRUM_PAD_VELOCITY = 100
 DRUM_NOTE_COUNT = 16
 STEP_COUNT = 16
@@ -48,6 +50,7 @@ class DrumModeLayoutManager(object):
     def __init__(self, surface, component):
         self._surface = surface
         self._component = component
+        self._component.set_native_routing_surface(surface)
         self._component.set_drum_pad_logger(self._log_pad)
         self._component.set_session_window_offsets(
             self._session_ring_track_offset(),
@@ -157,6 +160,9 @@ class StaticDrumModeLayoutComponent(Component):
         self._observed_clip_slots = []
         self._observed_tracks = []
         self._drum_pad_listeners = []
+        self._native_drum_buttons = {}
+        self._native_controlled_track = None
+        self._surface = None
         self._step_pad_listeners = []
         self._bar_pad_listeners = []
         self._held_drum_notes = {}
@@ -173,6 +179,9 @@ class StaticDrumModeLayoutComponent(Component):
         self._bar_blink_on = False
         self._displayed_active_drum_pitches = set()
         self._drum_flash_ticks = {}
+
+    def set_native_routing_surface(self, surface):
+        self._surface = surface
 
     def set_drum_pad_logger(self, logger):
         self._drum_pad_logger = logger
@@ -216,6 +225,7 @@ class StaticDrumModeLayoutComponent(Component):
             self._update_clip_slot_listeners()
             self._update_track_state_listeners()
             self._install_drum_pad_listeners()
+            self._update_native_drum_routing()
             self._install_step_pad_listeners()
             self._install_bar_pad_listeners()
             self._start_playhead_task()
@@ -233,6 +243,7 @@ class StaticDrumModeLayoutComponent(Component):
             self._update_clip_slot_listeners()
             self._update_track_state_listeners()
             self._install_drum_pad_listeners()
+            self._update_native_drum_routing()
             self._install_step_pad_listeners()
             self._install_bar_pad_listeners()
             self._start_playhead_task()
@@ -242,6 +253,7 @@ class StaticDrumModeLayoutComponent(Component):
             self._stop_playhead_task()
             self._stop_bar_blink_task()
             self._clear_active_drum_pitches()
+            self._release_native_drum_routing()
             self._remove_clip_selector_listeners()
             self._remove_clip_slot_listeners()
             self._remove_clip_content_listeners()
@@ -317,6 +329,8 @@ class StaticDrumModeLayoutComponent(Component):
             callback = self._make_drum_pad_callback(button, drum_index)
             self._add_button_value_listener(button, callback)
             self._drum_pad_listeners.append((button, callback))
+
+        self._update_native_drum_routing()
 
     def _install_step_pad_listeners(self):
         if self._matrix is None:
@@ -481,9 +495,7 @@ class StaticDrumModeLayoutComponent(Component):
         self._update_layout()
 
     def _remove_drum_pad_listeners(self):
-        if self._bridge_available():
-            for note in self._held_drum_notes.values():
-                self._send_note_off(note)
+        self._release_native_drum_routing()
 
         for button, callback in self._drum_pad_listeners:
             try:
@@ -564,17 +576,20 @@ class StaticDrumModeLayoutComponent(Component):
             button.set_light(DRUM_SELECTED_COLOR)
             self._select_drum(drum_index)
             self._log_pad(
+                "[LPX-DRUM-NATIVE] pad={} drum_index={} original_id={} translated_note={}".format(
+                    drum_name,
+                    drum_index,
+                    self._original_identifier_for_button(button),
+                    note,
+                )
+            )
+            self._log_pad(
                 "[LPX-DRUM-PAD] press drum={} note={} velocity={}".format(
                     drum_name,
                     note,
                     DRUM_PAD_VELOCITY,
                 )
             )
-
-            if not self._bridge_available():
-                self._log_pad("[LPX-DRUM-PAD] bridge_unavailable drum={}".format(drum_name))
-            else:
-                self._send_note_on(note)
             return
 
         if button in self._held_drum_notes:
@@ -585,12 +600,8 @@ class StaticDrumModeLayoutComponent(Component):
             if drum_index == self._selected_drum_index
             else DRUM_COLOR
         )
+        self._log_pad("[LPX-DRUM-NATIVE] pad note={} release".format(note))
         self._log_pad("[LPX-DRUM-PAD] release drum={} note={}".format(drum_name, note))
-
-        if not self._bridge_available():
-            self._log_pad("[LPX-DRUM-PAD] bridge_unavailable drum={}".format(drum_name))
-        else:
-            self._send_note_off(note)
 
     def _on_step_pad_value(self, step_index, value):
         if value > 0:
@@ -626,6 +637,7 @@ class StaticDrumModeLayoutComponent(Component):
         self._selected_scene_index = scene_index
         self._clear_playhead()
         self._highlight_clip_slot(track, clip_slot)
+        self._update_native_drum_routing()
         self._log_pad(
             "[LPX-DRUM-CLIP] map physical=({},{}) old=({},{}) final=({},{}) track={} scene={}".format(
                 physical_x,
@@ -1060,6 +1072,194 @@ class StaticDrumModeLayoutComponent(Component):
 
     def _selected_track(self):
         return self._track_at_index(self._selected_track_index)
+
+    def _update_native_drum_routing(self):
+        if self._matrix is None or not self.is_enabled():
+            self._release_native_drum_routing()
+            return
+
+        track = self._selected_track()
+
+        if not self._track_supports_midi(track):
+            self._release_native_drum_routing()
+            self._log_native_selected_track(track, controlled=False)
+            return
+
+        if track != self._native_controlled_track:
+            self._release_controlled_track()
+            self._set_controlled_track(track)
+
+        self._enable_native_drum_buttons()
+
+    def _set_controlled_track(self, track):
+        if not liveobj_valid(track) or self._surface is None:
+            return
+
+        try:
+            self._surface.set_controlled_track(track)
+            self._native_controlled_track = track
+            self._log_native_selected_track(track, controlled=True)
+        except (AttributeError, RuntimeError, TypeError):
+            self._native_controlled_track = None
+
+    def _release_controlled_track(self):
+        track = self._native_controlled_track
+
+        if self._surface is not None:
+            try:
+                self._surface.release_controlled_track()
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+
+        if liveobj_valid(track):
+            self._log_pad(
+                "[LPX-DRUM-NATIVE] release track={} name={}".format(
+                    self._track_index(track),
+                    getattr(track, "name", None),
+                )
+            )
+
+        self._native_controlled_track = None
+
+    def _enable_native_drum_buttons(self):
+        current_buttons = {}
+
+        for button, (physical_x, physical_y) in self._iter_matrix_buttons():
+            logical_x, logical_y = self._logical_coordinate(physical_x, physical_y)
+            drum_index = self._drum_index_for_coordinate(logical_x, logical_y)
+
+            if drum_index is None:
+                continue
+
+            current_buttons[button] = DRUM_BASE_NOTE + drum_index
+
+        for button in list(self._native_drum_buttons.keys()):
+            if button not in current_buttons:
+                self._restore_native_drum_button(button)
+
+        for button, note in current_buttons.items():
+            self._enable_native_drum_button(button, note)
+
+    def _enable_native_drum_button(self, button, note):
+        state = self._native_drum_buttons.get(button)
+
+        if state is None:
+            state = self._capture_native_drum_button_state(button)
+            self._native_drum_buttons[button] = state
+
+        try:
+            self._set_button_identifier(button, int(note))
+            self._set_button_channel(button, DRUM_NATIVE_CHANNEL)
+            button.enabled = True
+            button.script_forwarding = ScriptForwarding.non_consuming
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pass
+
+    def _capture_native_drum_button_state(self, button):
+        return {
+            "identifier": getattr(button, "identifier", None),
+            "original_identifier": getattr(button, "original_identifier", None),
+            "channel": getattr(button, "channel", None),
+            "original_channel": getattr(button, "original_channel", None),
+            "enabled": getattr(button, "enabled", None),
+            "script_forwarding": getattr(button, "script_forwarding", None),
+        }
+
+    def _restore_native_drum_button(self, button):
+        state = self._native_drum_buttons.pop(button, None)
+
+        if state is None:
+            return
+
+        try:
+            self._set_button_identifier(
+                button,
+                self._state_value(state, "identifier", "original_identifier"),
+            )
+            self._set_button_channel(
+                button,
+                self._state_value(state, "channel", "original_channel"),
+            )
+            if state["script_forwarding"] is not None:
+                button.script_forwarding = state["script_forwarding"]
+            if state["enabled"] is not None:
+                button.enabled = state["enabled"]
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pass
+
+    def _set_button_identifier(self, button, identifier):
+        if identifier is None:
+            return
+
+        set_identifier = getattr(button, "set_identifier", None)
+
+        if callable(set_identifier):
+            set_identifier(int(identifier))
+            return
+
+        button.identifier = int(identifier)
+
+    def _set_button_channel(self, button, channel):
+        if channel is None:
+            return
+
+        set_channel = getattr(button, "set_channel", None)
+
+        if callable(set_channel):
+            set_channel(int(channel))
+            return
+
+        button.channel = int(channel)
+
+    def _state_value(self, state, name, fallback_name):
+        value = state.get(name)
+
+        if value is not None:
+            return value
+
+        return state.get(fallback_name)
+
+    def _original_identifier_for_button(self, button):
+        state = self._native_drum_buttons.get(button, {})
+        value = self._state_value(state, "original_identifier", "identifier")
+
+        if value is not None:
+            return value
+
+        return getattr(button, "original_identifier", getattr(button, "identifier", None))
+
+    def _release_native_drum_routing(self):
+        for button in list(self._native_drum_buttons.keys()):
+            self._restore_native_drum_button(button)
+
+        self._release_controlled_track()
+
+    def _log_native_selected_track(self, track, controlled):
+        if not liveobj_valid(track):
+            self._log_pad("[LPX-DRUM-NATIVE] selected track=None")
+            return
+
+        track_index = self._track_index(track)
+        self._log_pad(
+            "[LPX-DRUM-NATIVE] selected track={} name={}".format(
+                track_index,
+                getattr(track, "name", None),
+            )
+        )
+
+        if controlled:
+            self._log_pad(
+                "[LPX-DRUM-NATIVE] controlled track={} name={}".format(
+                    track_index,
+                    getattr(track, "name", None),
+                )
+            )
+
+    def _track_index(self, track):
+        try:
+            return list(self.song.tracks).index(track)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return None
 
     def _selected_clip_slot(self):
         return self._clip_slot_at_address(
