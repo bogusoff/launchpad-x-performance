@@ -3,11 +3,16 @@ from __future__ import absolute_import, print_function, unicode_literals
 import Live
 from ableton.v2.base import liveobj_valid, task
 from ableton.v2.control_surface import Component
+from ableton.v2.control_surface.components.clip_slot import find_nearest_color
 from ableton.v2.control_surface.elements import Color
-from novation.colors import Rgb
+from novation.colors import Blink, CLIP_COLOR_TABLE, RGB_COLOR_TABLE, Rgb
 
 
-CONTROL_COLOR = Color(Rgb.CREAM.midi_value)
+CLIP_SELECTOR_EMPTY_COLOR = Color(0)
+CLIP_SELECTOR_SELECTED_EMPTY_COLOR = Blink(Color(0), Color(Rgb.WHITE.midi_value))
+CLIP_SELECTOR_PLAYING_COLOR = Color(Rgb.GREEN.midi_value)
+CLIP_SELECTOR_SELECTED_PLAYING_COLOR = Blink(Color(Rgb.GREEN.midi_value), Color(Rgb.WHITE.midi_value))
+CLIP_SELECTOR_TRIGGERED_COLOR = Rgb.GREEN_BLINK
 DRUM_COLOR = Color(Rgb.BLUE.midi_value)
 DRUM_SELECTED_COLOR = Color(Rgb.AQUA.midi_value)
 STEP_COLOR = Color(Rgb.WHITE_HALF.midi_value)
@@ -28,7 +33,10 @@ STEP_COUNT = 16
 STEP_DURATION = 0.25
 STEP_EPSILON = 0.01
 STEP_VELOCITY = 100
-PATTERN_SLOT_INDEX = 0
+INITIAL_TRACK_INDEX = 0
+INITIAL_SCENE_INDEX = 0
+CLIP_SELECTOR_TRACKS = 4
+CLIP_SELECTOR_SCENES = 4
 PLAYHEAD_REFRESH = 0.04
 BAR_LENGTH = 4.0
 BAR_COUNT = 8
@@ -41,13 +49,24 @@ class DrumModeLayoutManager(object):
         self._surface = surface
         self._component = component
         self._component.set_drum_pad_logger(self._log_pad)
+        self._component.set_session_window_offsets(
+            self._session_ring_track_offset(),
+            self._session_ring_scene_offset(),
+        )
         self._surface._mixer_modes.add_selected_mode_listener(self._on_mode_changed)
         self._surface._session_modes.add_selected_mode_listener(self._on_mode_changed)
         self._surface._main_modes.add_selected_mode_listener(self._on_mode_changed)
+        self._add_session_ring_offset_listener()
         self._refresh()
 
     def _on_mode_changed(self, *_):
         self._refresh()
+
+    def _on_session_ring_offset_changed(self, *_):
+        self._component.set_session_window_offsets(
+            self._session_ring_track_offset(),
+            self._session_ring_scene_offset(),
+        )
 
     def _overlay_should_be_enabled(self):
         return (
@@ -60,7 +79,57 @@ class DrumModeLayoutManager(object):
         enabled = self._overlay_should_be_enabled()
         if enabled:
             self._surface._session_layout_mode()
+            self._component.set_session_window_offsets(
+                self._session_ring_track_offset(),
+                self._session_ring_scene_offset(),
+            )
         self._component.set_enabled(enabled)
+
+    def _session_ring_track_offset(self):
+        try:
+            return max(0, int(self._surface._session_ring.track_offset))
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return 0
+
+    def _session_ring_scene_offset(self):
+        try:
+            return max(0, int(self._surface._session_ring.scene_offset))
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return 0
+
+    def _add_session_ring_offset_listener(self):
+        session_ring = getattr(self._surface, "_session_ring", None)
+
+        if session_ring is None:
+            return
+
+        try:
+            if not session_ring.offset_has_listener(self._on_session_ring_offset_changed):
+                session_ring.add_offset_listener(self._on_session_ring_offset_changed)
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+
+    def disconnect(self):
+        self._remove_mode_listener(getattr(self._surface, "_mixer_modes", None))
+        self._remove_mode_listener(getattr(self._surface, "_session_modes", None))
+        self._remove_mode_listener(getattr(self._surface, "_main_modes", None))
+
+        session_ring = getattr(self._surface, "_session_ring", None)
+
+        try:
+            if session_ring is not None and session_ring.offset_has_listener(
+                self._on_session_ring_offset_changed
+            ):
+                session_ring.remove_offset_listener(self._on_session_ring_offset_changed)
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+
+    def _remove_mode_listener(self, modes):
+        try:
+            if modes.selected_mode_has_listener(self._on_mode_changed):
+                modes.remove_selected_mode_listener(self._on_mode_changed)
+        except (AttributeError, RuntimeError, TypeError):
+            pass
 
     def _log_pad(self, message):
         self._log_message(message)
@@ -81,12 +150,22 @@ class StaticDrumModeLayoutComponent(Component):
         super(StaticDrumModeLayoutComponent, self).__init__(*a, **k)
         self._matrix = None
         self._drum_pad_logger = None
+        self._clip_selector_listeners = []
+        self._clip_slot_listeners = []
+        self._clip_content_listeners = []
+        self._track_state_listeners = []
+        self._observed_clip_slots = []
+        self._observed_tracks = []
         self._drum_pad_listeners = []
         self._step_pad_listeners = []
         self._bar_pad_listeners = []
         self._held_drum_notes = {}
         self._selected_drum_index = 0
         self._selected_note = DRUM_BASE_NOTE
+        self._clip_window_track_offset = 0
+        self._clip_window_scene_offset = 0
+        self._selected_track_index = INITIAL_TRACK_INDEX
+        self._selected_scene_index = INITIAL_SCENE_INDEX
         self._selected_bar_index = 0
         self._playhead_task = None
         self._playhead_step_index = None
@@ -99,14 +178,43 @@ class StaticDrumModeLayoutComponent(Component):
         self._drum_pad_logger = logger
         self._log_bridge_manager_attached()
 
+    def set_session_window_offsets(self, track_offset, scene_offset):
+        track_offset = max(0, int(track_offset))
+        scene_offset = max(0, int(scene_offset))
+
+        if (
+            track_offset == self._clip_window_track_offset
+            and scene_offset == self._clip_window_scene_offset
+        ):
+            return
+
+        self._clip_window_track_offset = track_offset
+        self._clip_window_scene_offset = scene_offset
+        self._log_pad(
+            "[LPX-DRUM-CLIP] window track_offset={} scene_offset={}".format(
+                track_offset,
+                scene_offset,
+            )
+        )
+        self._update_clip_slot_listeners()
+        self._update_track_state_listeners()
+        self._update_layout()
+
     def set_matrix(self, matrix):
         if matrix != self._matrix:
+            self._remove_clip_selector_listeners()
+            self._remove_clip_slot_listeners()
+            self._remove_clip_content_listeners()
+            self._remove_track_state_listeners()
             self._remove_drum_pad_listeners()
             self._remove_step_pad_listeners()
             self._remove_bar_pad_listeners()
             self._matrix = matrix
 
         if self.is_enabled() and self._matrix is not None:
+            self._install_clip_selector_listeners()
+            self._update_clip_slot_listeners()
+            self._update_track_state_listeners()
             self._install_drum_pad_listeners()
             self._install_step_pad_listeners()
             self._install_bar_pad_listeners()
@@ -121,6 +229,9 @@ class StaticDrumModeLayoutComponent(Component):
     def on_enabled_changed(self):
         super(StaticDrumModeLayoutComponent, self).on_enabled_changed()
         if self.is_enabled():
+            self._install_clip_selector_listeners()
+            self._update_clip_slot_listeners()
+            self._update_track_state_listeners()
             self._install_drum_pad_listeners()
             self._install_step_pad_listeners()
             self._install_bar_pad_listeners()
@@ -131,6 +242,10 @@ class StaticDrumModeLayoutComponent(Component):
             self._stop_playhead_task()
             self._stop_bar_blink_task()
             self._clear_active_drum_pitches()
+            self._remove_clip_selector_listeners()
+            self._remove_clip_slot_listeners()
+            self._remove_clip_content_listeners()
+            self._remove_track_state_listeners()
             self._remove_drum_pad_listeners()
             self._remove_step_pad_listeners()
             self._remove_bar_pad_listeners()
@@ -140,8 +255,7 @@ class StaticDrumModeLayoutComponent(Component):
             return
 
         for button, (x, y) in self._iter_matrix_buttons():
-            logical_x, logical_y = self._logical_coordinate(x, y)
-            button.set_light(self._color_for_coordinate(logical_x, logical_y))
+            button.set_light(self._color_for_physical_coordinate(x, y))
 
         self._apply_playhead_light()
 
@@ -166,6 +280,26 @@ class StaticDrumModeLayoutComponent(Component):
         for item in self._matrix.iterbuttons():
             button, coordinate = item
             yield button, coordinate
+
+    def _install_clip_selector_listeners(self):
+        if self._matrix is None:
+            return
+
+        self._remove_clip_selector_listeners()
+
+        for button, (physical_x, physical_y) in self._iter_matrix_buttons():
+            local_index = self._clip_selector_index_for_coordinate(physical_x, physical_y)
+
+            if local_index is None:
+                continue
+
+            callback = self._make_clip_selector_callback(
+                local_index,
+                physical_x,
+                physical_y,
+            )
+            self._add_button_value_listener(button, callback)
+            self._clip_selector_listeners.append((button, callback))
 
     def _install_drum_pad_listeners(self):
         if self._matrix is None:
@@ -217,6 +351,134 @@ class StaticDrumModeLayoutComponent(Component):
             callback = self._make_bar_pad_callback(bar_index)
             self._add_button_value_listener(button, callback)
             self._bar_pad_listeners.append((button, callback))
+
+    def _remove_clip_selector_listeners(self):
+        for button, callback in self._clip_selector_listeners:
+            try:
+                if button.value_has_listener(callback):
+                    button.remove_value_listener(callback)
+            except (AttributeError, RuntimeError, TypeError):
+                try:
+                    button.remove_value_listener(callback)
+                except (AttributeError, RuntimeError, TypeError):
+                    pass
+
+        self._clip_selector_listeners = []
+
+    def _update_clip_slot_listeners(self):
+        if self._matrix is None or not self.is_enabled():
+            return
+
+        self._remove_clip_slot_listeners()
+        self._remove_clip_content_listeners()
+
+        for track_index, scene_index in self._visible_clip_addresses():
+            clip_slot = self._clip_slot_at_address(track_index, scene_index)
+
+            if not liveobj_valid(clip_slot):
+                continue
+
+            self._add_object_listener(
+                clip_slot,
+                "has_clip",
+                self._on_clip_selector_state_changed,
+                self._clip_slot_listeners,
+            )
+            self._add_object_listener(
+                clip_slot,
+                "color",
+                self._on_clip_selector_state_changed,
+                self._clip_slot_listeners,
+            )
+            self._observed_clip_slots.append(clip_slot)
+
+            if getattr(clip_slot, "has_clip", False):
+                clip = clip_slot.clip
+
+                if liveobj_valid(clip):
+                    for event_name in ("color", "playing_status", "is_recording"):
+                        self._add_object_listener(
+                            clip,
+                            event_name,
+                            self._on_clip_selector_state_changed,
+                            self._clip_content_listeners,
+                        )
+
+    def _remove_clip_slot_listeners(self):
+        self._remove_object_listeners(self._clip_slot_listeners)
+        self._clip_slot_listeners = []
+        self._observed_clip_slots = []
+        self._remove_clip_content_listeners()
+
+    def _remove_clip_content_listeners(self):
+        self._remove_object_listeners(self._clip_content_listeners)
+        self._clip_content_listeners = []
+
+    def _update_track_state_listeners(self):
+        tracks = [
+            track
+            for track_index in range(
+                self._clip_window_track_offset,
+                self._clip_window_track_offset + CLIP_SELECTOR_TRACKS,
+            )
+            for track in (self._track_at_index(track_index),)
+            if liveobj_valid(track)
+        ]
+
+        if tracks == self._observed_tracks:
+            return
+
+        self._remove_track_state_listeners()
+        self._observed_tracks = tracks
+
+        for track in self._observed_tracks:
+            for event_name in ("playing_slot_index", "fired_slot_index", "clip_slots"):
+                self._add_object_listener(
+                    track,
+                    event_name,
+                    self._on_clip_selector_state_changed,
+                    self._track_state_listeners,
+                )
+
+    def _remove_track_state_listeners(self):
+        self._remove_object_listeners(self._track_state_listeners)
+        self._track_state_listeners = []
+        self._observed_tracks = []
+
+    def _add_object_listener(self, obj, event_name, callback, listener_store):
+        add_name = "add_{}_listener".format(event_name)
+        has_name = "{}_has_listener".format(event_name)
+
+        if obj is None or not hasattr(obj, add_name):
+            return
+
+        try:
+            has_listener = getattr(obj, has_name, None)
+
+            if has_listener is None or not has_listener(callback):
+                getattr(obj, add_name)(callback)
+                listener_store.append((obj, event_name, callback))
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+
+    def _remove_object_listeners(self, listeners):
+        for obj, event_name, callback in listeners:
+            remove_name = "remove_{}_listener".format(event_name)
+            has_name = "{}_has_listener".format(event_name)
+
+            try:
+                if hasattr(obj, remove_name):
+                    has_listener = getattr(obj, has_name, None)
+
+                    if has_listener is None or has_listener(callback):
+                        getattr(obj, remove_name)(callback)
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+
+    def _on_clip_selector_state_changed(self, *_):
+        self._update_clip_slot_listeners()
+        self._update_track_state_listeners()
+        self._update_layout()
 
     def _remove_drum_pad_listeners(self):
         if self._bridge_available():
@@ -287,6 +549,12 @@ class StaticDrumModeLayoutComponent(Component):
 
         return callback
 
+    def _make_clip_selector_callback(self, local_index, physical_x, physical_y):
+        def callback(value):
+            self._on_clip_selector_value(local_index, physical_x, physical_y, value)
+
+        return callback
+
     def _on_drum_pad_value(self, button, drum_index, value):
         drum_name = "D{:02d}".format(drum_index + 1)
         note = DRUM_BASE_NOTE + drum_index
@@ -343,6 +611,50 @@ class StaticDrumModeLayoutComponent(Component):
         self._update_layout()
         self._update_playhead()
 
+    def _on_clip_selector_value(self, local_index, physical_x, physical_y, value):
+        if value <= 0:
+            return
+
+        local_track, local_scene = self._clip_selector_local_address(local_index)
+        track_index = self._clip_window_track_offset + local_track
+        scene_index = self._clip_window_scene_offset + local_scene
+        track = self._track_at_index(track_index)
+        clip_slot = self._clip_slot_at_address(track_index, scene_index)
+        has_clip = bool(liveobj_valid(clip_slot) and getattr(clip_slot, "has_clip", False))
+        is_midi = self._track_supports_midi(track)
+        self._selected_track_index = track_index
+        self._selected_scene_index = scene_index
+        self._clear_playhead()
+        self._highlight_clip_slot(track, clip_slot)
+        self._log_pad(
+            "[LPX-DRUM-CLIP] map physical=({},{}) old=({},{}) final=({},{}) track={} scene={}".format(
+                physical_x,
+                physical_y,
+                *self._clip_selector_previous_coordinates_for_physical_coordinate(
+                    physical_x,
+                    physical_y,
+                ),
+                local_track,
+                local_scene,
+                track_index,
+                scene_index,
+            )
+        )
+        self._log_pad(
+            "[LPX-DRUM-CLIP] select local=({},{}) track={} scene={} track_name={} has_clip={} midi={}".format(
+                local_track,
+                local_scene,
+                track_index,
+                scene_index,
+                getattr(track, "name", None),
+                has_clip,
+                is_midi,
+            )
+        )
+        self._log_clip_selector_color(track_index, scene_index, clip_slot)
+        self._update_layout()
+        self._update_playhead()
+
     def _select_drum(self, drum_index):
         self._selected_drum_index = drum_index
         self._selected_note = DRUM_BASE_NOTE + drum_index
@@ -355,7 +667,7 @@ class StaticDrumModeLayoutComponent(Component):
         self._update_layout()
 
     def _toggle_step(self, step_index):
-        clip = self._pattern_clip()
+        clip = self._pattern_clip(create=True)
 
         if clip is None:
             return
@@ -661,36 +973,149 @@ class StaticDrumModeLayoutComponent(Component):
             )
         )
 
-    def _pattern_clip(self, log_errors=True):
-        track = self._target_track()
+    def _pattern_clip(self, log_errors=True, create=False):
+        track = self._selected_track()
 
         if not liveobj_valid(track):
             if log_errors:
-                self._log_pad("[LPX-DRUM-STEP] no_target_track")
+                self._log_pad("[LPX-DRUM-STEP] no_selected_track")
             return None
 
-        clip_slots = getattr(track, "clip_slots", ())
-
-        if len(clip_slots) <= PATTERN_SLOT_INDEX:
+        if not self._track_supports_midi(track):
             if log_errors:
-                self._log_pad("[LPX-DRUM-STEP] no_clip slot=0")
+                self._log_pad(
+                    "[LPX-DRUM-CLIP] unsupported track={} reason=not_midi".format(
+                        getattr(track, "name", None)
+                    )
+                )
             return None
 
-        clip_slot = clip_slots[PATTERN_SLOT_INDEX]
+        clip_slot = self._selected_clip_slot()
 
-        if not liveobj_valid(clip_slot) or not getattr(clip_slot, "has_clip", False):
+        if not liveobj_valid(clip_slot):
             if log_errors:
-                self._log_pad("[LPX-DRUM-STEP] no_clip slot=0")
+                self._log_pad(
+                    "[LPX-DRUM-STEP] no_clip_slot track={} scene={}".format(
+                        self._selected_track_index,
+                        self._selected_scene_index,
+                    )
+                )
+            return None
+
+        if not getattr(clip_slot, "has_clip", False):
+            if create and self._create_midi_clip(
+                clip_slot,
+                self._selected_track_index,
+                self._selected_scene_index,
+            ):
+                self._update_clip_slot_listeners()
+                self._update_track_state_listeners()
+            else:
+                if log_errors:
+                    self._log_pad(
+                        "[LPX-DRUM-STEP] no_clip track={} scene={}".format(
+                            self._selected_track_index,
+                            self._selected_scene_index,
+                        )
+                    )
+                return None
+
+        if not getattr(clip_slot, "has_clip", False):
+            if log_errors:
+                self._log_pad(
+                    "[LPX-DRUM-STEP] no_clip track={} scene={}".format(
+                        self._selected_track_index,
+                        self._selected_scene_index,
+                    )
+                )
             return None
 
         clip = clip_slot.clip
 
         if not getattr(clip, "is_midi_clip", False):
             if log_errors:
-                self._log_pad("[LPX-DRUM-STEP] clip_not_midi slot=0")
+                self._log_pad(
+                    "[LPX-DRUM-STEP] clip_not_midi track={} scene={}".format(
+                        self._selected_track_index,
+                        self._selected_scene_index,
+                    )
+                )
             return None
 
         return clip
+
+    def _create_midi_clip(self, clip_slot, track_index, scene_index):
+        try:
+            clip_slot.create_clip(BAR_LENGTH)
+            self._log_pad(
+                "[LPX-DRUM-CLIP] create track={} scene={} length={}".format(
+                    track_index,
+                    scene_index,
+                    BAR_LENGTH,
+                )
+            )
+            return True
+        except (AttributeError, RuntimeError, TypeError):
+            return False
+
+    def _selected_track(self):
+        return self._track_at_index(self._selected_track_index)
+
+    def _selected_clip_slot(self):
+        return self._clip_slot_at_address(
+            self._selected_track_index,
+            self._selected_scene_index,
+        )
+
+    def _track_at_index(self, track_index):
+        tracks = getattr(self.song, "tracks", ())
+
+        if track_index < 0 or track_index >= len(tracks):
+            return None
+
+        return tracks[track_index]
+
+    def _clip_slot_at_address(self, track_index, scene_index):
+        track = self._track_at_index(track_index)
+
+        if not liveobj_valid(track):
+            return None
+
+        clip_slots = getattr(track, "clip_slots", ())
+
+        if scene_index < 0 or scene_index >= len(clip_slots):
+            return None
+
+        return clip_slots[scene_index]
+
+    def _visible_clip_addresses(self):
+        for local_scene in range(CLIP_SELECTOR_SCENES):
+            for local_track in range(CLIP_SELECTOR_TRACKS):
+                yield (
+                    self._clip_window_track_offset + local_track,
+                    self._clip_window_scene_offset + local_scene,
+                )
+
+    def _clip_selector_local_address(self, local_index):
+        local_index = max(
+            0,
+            min(CLIP_SELECTOR_TRACKS * CLIP_SELECTOR_SCENES - 1, int(local_index)),
+        )
+        return local_index % CLIP_SELECTOR_TRACKS, local_index // CLIP_SELECTOR_TRACKS
+
+    def _track_supports_midi(self, track):
+        return bool(liveobj_valid(track) and getattr(track, "has_midi_input", False))
+
+    def _highlight_clip_slot(self, track, clip_slot):
+        if not liveobj_valid(clip_slot):
+            return
+
+        try:
+            if liveobj_valid(track):
+                self.song.view.selected_track = track
+            self.song.view.highlighted_clip_slot = clip_slot
+        except (AttributeError, RuntimeError, TypeError):
+            pass
 
     def _target_track(self):
         if self._drum_bridge is None:
@@ -847,6 +1272,15 @@ class StaticDrumModeLayoutComponent(Component):
     def _logical_coordinate(self, x, y):
         return y, x
 
+    def _color_for_physical_coordinate(self, x, y):
+        clip_selector_index = self._clip_selector_index_for_coordinate(x, y)
+
+        if clip_selector_index is not None:
+            return self._color_for_clip_selector_index(clip_selector_index)
+
+        logical_x, logical_y = self._logical_coordinate(x, y)
+        return self._color_for_coordinate(logical_x, logical_y)
+
     def _color_for_coordinate(self, x, y):
         if y == 7:
             return OFF_COLOR
@@ -863,7 +1297,115 @@ class StaticDrumModeLayoutComponent(Component):
             drum_index = self._drum_index_for_coordinate(x, y)
             return self._color_for_drum_index(drum_index)
 
-        return CONTROL_COLOR
+        return OFF_COLOR
+
+    def _clip_selector_index_for_coordinate(self, x, y):
+        coordinates = self._clip_selector_coordinates_for_physical_coordinate(x, y)
+
+        if coordinates is None:
+            return None
+
+        cx, cy = coordinates
+        return cy * CLIP_SELECTOR_TRACKS + cx
+
+    def _clip_selector_coordinates_for_physical_coordinate(self, x, y):
+        coordinates = self._clip_selector_previous_coordinates_for_physical_coordinate(x, y)
+
+        if coordinates is None:
+            return None
+
+        cx, cy = coordinates
+        return CLIP_SELECTOR_TRACKS - 1 - cx, CLIP_SELECTOR_SCENES - 1 - cy
+
+    def _clip_selector_previous_coordinates_for_physical_coordinate(self, x, y):
+        if x < 0 or x >= CLIP_SELECTOR_TRACKS or y < 0 or y >= CLIP_SELECTOR_SCENES:
+            return None
+
+        rotated_x = CLIP_SELECTOR_TRACKS - 1 - y
+        rotated_y = x
+        return rotated_x, CLIP_SELECTOR_SCENES - 1 - rotated_y
+
+    def _color_for_clip_selector_index(self, local_index):
+        if local_index is None:
+            return CLIP_SELECTOR_EMPTY_COLOR
+
+        local_track, local_scene = self._clip_selector_local_address(local_index)
+        track_index = self._clip_window_track_offset + local_track
+        scene_index = self._clip_window_scene_offset + local_scene
+        clip_slot = self._clip_slot_at_address(track_index, scene_index)
+
+        if not liveobj_valid(clip_slot):
+            return CLIP_SELECTOR_EMPTY_COLOR
+
+        is_selected = (
+            track_index == self._selected_track_index
+            and scene_index == self._selected_scene_index
+        )
+        has_clip = bool(getattr(clip_slot, "has_clip", False))
+        clip = clip_slot.clip if has_clip else None
+        is_playing = bool(liveobj_valid(clip) and getattr(clip, "is_playing", False))
+        is_triggered = bool(liveobj_valid(clip) and getattr(clip, "is_triggered", False))
+
+        if is_triggered:
+            return CLIP_SELECTOR_TRIGGERED_COLOR
+
+        if is_selected and is_playing:
+            return CLIP_SELECTOR_SELECTED_PLAYING_COLOR
+
+        if is_playing:
+            return CLIP_SELECTOR_PLAYING_COLOR
+
+        if is_selected and not has_clip:
+            return CLIP_SELECTOR_SELECTED_EMPTY_COLOR
+
+        base_color = self._clip_selector_base_color(clip_slot, clip)
+
+        if is_selected:
+            return Blink(base_color, Color(Rgb.WHITE.midi_value))
+
+        return base_color
+
+    def _clip_selector_base_color(self, clip_slot, clip):
+        if not liveobj_valid(clip):
+            return CLIP_SELECTOR_EMPTY_COLOR
+
+        clip_color = getattr(clip, "color", None)
+
+        if clip_color is None:
+            clip_color = getattr(clip_slot, "color", None)
+
+        return self._clip_color_to_led(clip_color)
+
+    def _clip_color_to_led(self, clip_color):
+        if clip_color is None:
+            return CLIP_SELECTOR_EMPTY_COLOR
+
+        try:
+            return Color(CLIP_COLOR_TABLE[clip_color])
+        except (KeyError, IndexError, TypeError):
+            try:
+                return Color(find_nearest_color(RGB_COLOR_TABLE, clip_color))
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                return CLIP_SELECTOR_EMPTY_COLOR
+
+    def _log_clip_selector_color(self, track_index, scene_index, clip_slot):
+        if not liveobj_valid(clip_slot) or not getattr(clip_slot, "has_clip", False):
+            return
+
+        clip = clip_slot.clip
+        clip_color = getattr(clip, "color", None) if liveobj_valid(clip) else None
+        led_color = self._clip_selector_base_color(clip_slot, clip)
+        self._log_pad(
+            "[LPX-DRUM-CLIP] color track={} scene={} clip_color={} led_value={}".format(
+                track_index,
+                scene_index,
+                clip_color,
+                self._color_log_value(led_color),
+            )
+        )
+
+    def _color_log_value(self, color):
+        return getattr(color, "midi_value", repr(color))
 
     def _drum_index_for_coordinate(self, x, y):
         if x < 4 or y > 3:
@@ -978,6 +1520,9 @@ class StaticDrumModeLayoutComponent(Component):
         self._stop_playhead_task()
         self._stop_bar_blink_task()
         self._clear_active_drum_pitches()
+        self._remove_clip_selector_listeners()
+        self._remove_clip_slot_listeners()
+        self._remove_track_state_listeners()
         self._remove_drum_pad_listeners()
         self._remove_step_pad_listeners()
         self._remove_bar_pad_listeners()

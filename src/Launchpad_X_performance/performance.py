@@ -44,6 +44,14 @@ class Launchpad_X_Performance(Launchpad_X):
             component=self._performance_drum_mode_layout,
         )
 
+    def disconnect(self):
+        try:
+            self._performance_drum_mode_layout_manager.disconnect()
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+
+        super(Launchpad_X_Performance, self).disconnect()
+
 install_clip_launch()
 install_clip_delete()
 install_scene_stop()
