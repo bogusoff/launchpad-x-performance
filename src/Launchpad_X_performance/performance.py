@@ -11,6 +11,7 @@ from .fixed_length_manager import PerformanceFixedLengthManager
 from .launchpad_x import Launchpad_X
 from .mixer_stop import install_mixer_side_stop
 from .scene_stop import install_scene_stop
+from .session_global import install_session_global_actions
 
 class Launchpad_X_Performance(Launchpad_X):
     def _create_components(self):
@@ -57,3 +58,4 @@ install_clip_launch()
 install_clip_delete()
 install_scene_stop()
 install_mixer_side_stop()
+install_session_global_actions()

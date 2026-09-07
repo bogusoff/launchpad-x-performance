@@ -8,6 +8,8 @@ from ableton.v2.control_surface.components.clip_slot import find_nearest_color
 from ableton.v2.control_surface.elements import Color
 from novation.colors import Blink, CLIP_COLOR_TABLE, RGB_COLOR_TABLE, Rgb
 
+from .scene_stop import SCENE_HOLD_SECONDS, exclude_clip_slot_from_pending_scene_stop
+
 
 CLIP_SELECTOR_EMPTY_COLOR = Color(0)
 CLIP_SELECTOR_SELECTED_EMPTY_COLOR = Blink(Color(0), Color(Rgb.WHITE.midi_value))
@@ -16,6 +18,7 @@ CLIP_SELECTOR_SELECTED_PLAYING_COLOR = Blink(Color(Rgb.GREEN.midi_value), Color(
 CLIP_SELECTOR_TRIGGERED_COLOR = Rgb.GREEN_BLINK
 DRUM_COLOR = Color(Rgb.BLUE.midi_value)
 DRUM_SELECTED_COLOR = Color(Rgb.AQUA.midi_value)
+DRUM_SELECTED_BLINK_COLOR = Color(Rgb.RED.midi_value)
 STEP_COLOR = Color(Rgb.WHITE_HALF.midi_value)
 STEP_ON_COLOR = Color(Rgb.WHITE.midi_value)
 STEP_PLAYHEAD_COLOR = Color(Rgb.AQUA.midi_value)
@@ -26,6 +29,13 @@ BAR_EMPTY_COLOR = Color(Rgb.BLUE.midi_value)
 BAR_BEYOND_COLOR = Color(Rgb.DARK_BLUE_HALF.midi_value)
 BAR_SELECTED_COLOR = Color(Rgb.GREEN.midi_value)
 DRUM_PLAYBACK_COLOR = Color(Rgb.YELLOW.midi_value)
+COMMAND_CLEAR_COLOR = Color(Rgb.RED.midi_value)
+COMMAND_ERASE_COLOR = Color(Rgb.ORANGE.midi_value)
+COMMAND_COPY_COLOR = Color(Rgb.LIGHT_BLUE.midi_value)
+COMMAND_VELOCITY_FIXED_COLOR = Color(Rgb.BLUE.midi_value)
+COMMAND_VELOCITY_SENSITIVE_COLOR = Color(Rgb.WHITE.midi_value)
+COMMAND_OCTAVE_DEFAULT_COLOR = Color(Rgb.GREEN.midi_value)
+COMMAND_OCTAVE_ACTIVE_COLOR = Color(Rgb.RED.midi_value)
 OFF_COLOR = Color(0)
 DRUM_BASE_NOTE = 36
 DRUM_NATIVE_CHANNEL = 9
@@ -34,7 +44,7 @@ DRUM_NOTE_COUNT = 16
 STEP_COUNT = 16
 STEP_DURATION = 0.25
 STEP_EPSILON = 0.01
-STEP_VELOCITY = 100
+STEP_VELOCITY = 127
 INITIAL_TRACK_INDEX = 0
 INITIAL_SCENE_INDEX = 0
 CLIP_SELECTOR_TRACKS = 4
@@ -154,6 +164,7 @@ class StaticDrumModeLayoutComponent(Component):
         self._matrix = None
         self._drum_pad_logger = None
         self._clip_selector_listeners = []
+        self._clip_selector_installing = False
         self._clip_slot_listeners = []
         self._clip_content_listeners = []
         self._track_state_listeners = []
@@ -165,9 +176,16 @@ class StaticDrumModeLayoutComponent(Component):
         self._surface = None
         self._step_pad_listeners = []
         self._bar_pad_listeners = []
+        self._command_pad_listeners = []
+        self._clear_clip_hold_task = None
+        self._clear_clip_pressed = False
+        self._clear_clip_long_pressed = False
+        self._erase_pitch_modifier = False
+        self._step_velocity_sensitive = False
+        self._drum_octave_offset = 0
         self._held_drum_notes = {}
         self._selected_drum_index = 0
-        self._selected_note = DRUM_BASE_NOTE
+        self._selected_note = self._effective_note_for_drum_index(self._selected_drum_index)
         self._clip_window_track_offset = 0
         self._clip_window_scene_offset = 0
         self._selected_track_index = INITIAL_TRACK_INDEX
@@ -175,10 +193,13 @@ class StaticDrumModeLayoutComponent(Component):
         self._selected_bar_index = 0
         self._playhead_task = None
         self._playhead_step_index = None
+        self._last_playback_position = None
+        self._last_playback_clip = None
         self._bar_blink_task = None
         self._bar_blink_on = False
         self._displayed_active_drum_pitches = set()
         self._drum_flash_ticks = {}
+        self._logged_step_onsets = set()
 
     def set_native_routing_surface(self, surface):
         self._surface = surface
@@ -218,6 +239,7 @@ class StaticDrumModeLayoutComponent(Component):
             self._remove_drum_pad_listeners()
             self._remove_step_pad_listeners()
             self._remove_bar_pad_listeners()
+            self._remove_command_pad_listeners()
             self._matrix = matrix
 
         if self.is_enabled() and self._matrix is not None:
@@ -228,6 +250,7 @@ class StaticDrumModeLayoutComponent(Component):
             self._update_native_drum_routing()
             self._install_step_pad_listeners()
             self._install_bar_pad_listeners()
+            self._install_command_pad_listeners()
             self._start_playhead_task()
             self._start_bar_blink_task()
             self._update_layout()
@@ -246,10 +269,12 @@ class StaticDrumModeLayoutComponent(Component):
             self._update_native_drum_routing()
             self._install_step_pad_listeners()
             self._install_bar_pad_listeners()
+            self._install_command_pad_listeners()
             self._start_playhead_task()
             self._start_bar_blink_task()
             self._update_layout()
         else:
+            self._clear_command_state()
             self._stop_playhead_task()
             self._stop_bar_blink_task()
             self._clear_active_drum_pitches()
@@ -261,6 +286,7 @@ class StaticDrumModeLayoutComponent(Component):
             self._remove_drum_pad_listeners()
             self._remove_step_pad_listeners()
             self._remove_bar_pad_listeners()
+            self._remove_command_pad_listeners()
 
     def _update_layout(self):
         if not self.is_enabled() or self._matrix is None:
@@ -298,20 +324,24 @@ class StaticDrumModeLayoutComponent(Component):
             return
 
         self._remove_clip_selector_listeners()
+        self._clip_selector_installing = True
 
-        for button, (physical_x, physical_y) in self._iter_matrix_buttons():
-            local_index = self._clip_selector_index_for_coordinate(physical_x, physical_y)
+        try:
+            for button, (physical_x, physical_y) in self._iter_matrix_buttons():
+                local_index = self._clip_selector_index_for_coordinate(physical_x, physical_y)
 
-            if local_index is None:
-                continue
+                if local_index is None:
+                    continue
 
-            callback = self._make_clip_selector_callback(
-                local_index,
-                physical_x,
-                physical_y,
-            )
-            self._add_button_value_listener(button, callback)
-            self._clip_selector_listeners.append((button, callback))
+                callback = self._make_clip_selector_callback(
+                    local_index,
+                    physical_x,
+                    physical_y,
+                )
+                self._add_button_value_listener(button, callback)
+                self._clip_selector_listeners.append((button, callback))
+        finally:
+            self._clip_selector_installing = False
 
     def _install_drum_pad_listeners(self):
         if self._matrix is None:
@@ -365,6 +395,23 @@ class StaticDrumModeLayoutComponent(Component):
             callback = self._make_bar_pad_callback(bar_index)
             self._add_button_value_listener(button, callback)
             self._bar_pad_listeners.append((button, callback))
+
+    def _install_command_pad_listeners(self):
+        if self._matrix is None:
+            return
+
+        self._remove_command_pad_listeners()
+
+        for button, (physical_x, physical_y) in self._iter_matrix_buttons():
+            logical_x, logical_y = self._logical_coordinate(physical_x, physical_y)
+            command_index = self._command_index_for_coordinate(logical_x, logical_y)
+
+            if command_index is None:
+                continue
+
+            callback = self._make_command_pad_callback(command_index)
+            self._add_button_value_listener(button, callback)
+            self._command_pad_listeners.append((button, callback))
 
     def _remove_clip_selector_listeners(self):
         for button, callback in self._clip_selector_listeners:
@@ -536,6 +583,19 @@ class StaticDrumModeLayoutComponent(Component):
 
         self._bar_pad_listeners = []
 
+    def _remove_command_pad_listeners(self):
+        for button, callback in self._command_pad_listeners:
+            try:
+                if button.value_has_listener(callback):
+                    button.remove_value_listener(callback)
+            except (AttributeError, RuntimeError, TypeError):
+                try:
+                    button.remove_value_listener(callback)
+                except (AttributeError, RuntimeError, TypeError):
+                    pass
+
+        self._command_pad_listeners = []
+
     def _add_button_value_listener(self, button, callback):
         try:
             if not button.value_has_listener(callback):
@@ -561,6 +621,12 @@ class StaticDrumModeLayoutComponent(Component):
 
         return callback
 
+    def _make_command_pad_callback(self, command_index):
+        def callback(value):
+            self._on_command_pad_value(command_index, value)
+
+        return callback
+
     def _make_clip_selector_callback(self, local_index, physical_x, physical_y):
         def callback(value):
             self._on_clip_selector_value(local_index, physical_x, physical_y, value)
@@ -569,9 +635,14 @@ class StaticDrumModeLayoutComponent(Component):
 
     def _on_drum_pad_value(self, button, drum_index, value):
         drum_name = "D{:02d}".format(drum_index + 1)
-        note = DRUM_BASE_NOTE + drum_index
+        note = self._effective_note_for_drum_index(drum_index)
 
         if value > 0:
+            if self._erase_pitch_modifier:
+                self._select_drum(drum_index)
+                self._erase_pitch_from_selected_bar(note)
+                return
+
             self._held_drum_notes[button] = note
             button.set_light(DRUM_SELECTED_COLOR)
             self._select_drum(drum_index)
@@ -595,20 +666,20 @@ class StaticDrumModeLayoutComponent(Component):
         if button in self._held_drum_notes:
             del self._held_drum_notes[button]
 
-        button.set_light(
-            DRUM_SELECTED_COLOR
-            if drum_index == self._selected_drum_index
-            else DRUM_COLOR
-        )
+        button.set_light(self._color_for_drum_index(drum_index))
         self._log_pad("[LPX-DRUM-NATIVE] pad note={} release".format(note))
         self._log_pad("[LPX-DRUM-PAD] release drum={} note={}".format(drum_name, note))
 
     def _on_step_pad_value(self, step_index, value):
         if value > 0:
-            self._toggle_step(step_index)
+            self._toggle_step(step_index, value)
 
     def _on_bar_pad_value(self, bar_index, value):
         if value <= 0:
+            return
+
+        if self._erase_pitch_modifier:
+            self._erase_selected_bar(bar_index)
             return
 
         self._selected_bar_index = max(0, min(BAR_COUNT - 1, int(bar_index)))
@@ -622,13 +693,94 @@ class StaticDrumModeLayoutComponent(Component):
         self._update_layout()
         self._update_playhead()
 
-    def _on_clip_selector_value(self, local_index, physical_x, physical_y, value):
-        if value <= 0:
+    def _on_command_pad_value(self, command_index, value):
+        if command_index == 0:
+            self._on_clear_clip_command_value(value)
+        elif command_index == 1:
+            self._on_erase_pitch_command_value(value)
+        elif value > 0 and command_index == 2:
+            self._copy_selected_bar_to_next_bar()
+        elif value > 0 and command_index == 5:
+            self._toggle_step_velocity_mode()
+        elif value > 0 and command_index == 6:
+            self._change_drum_octave(-1)
+        elif value > 0 and command_index == 7:
+            self._change_drum_octave(1)
+
+    def _on_clear_clip_command_value(self, value):
+        if value > 0:
+            self._clear_clip_pressed = True
+            self._clear_clip_long_pressed = False
+            self._kill_clear_clip_hold_task()
+
+            self._clear_clip_hold_task = self._tasks.add(
+                task.sequence(
+                    task.wait(SCENE_HOLD_SECONDS),
+                    task.run(self._clear_clip_if_still_held),
+                )
+            )
             return
 
+        self._clear_clip_pressed = False
+        self._kill_clear_clip_hold_task()
+
+        if self._clear_clip_long_pressed:
+            self._clear_clip_long_pressed = False
+
+    def _on_erase_pitch_command_value(self, value):
+        modifier_enabled = value > 0
+
+        if self._erase_pitch_modifier == modifier_enabled:
+            return
+
+        self._erase_pitch_modifier = modifier_enabled
+        self._held_drum_notes = {}
+        self._update_native_drum_routing()
+        self._update_layout()
+
+    def _clear_clip_if_still_held(self):
+        self._clear_clip_hold_task = None
+
+        if not self._clear_clip_pressed:
+            return
+
+        self._clear_clip_long_pressed = True
+        self._clear_selected_clip_notes()
+
+    def _kill_clear_clip_hold_task(self):
+        if self._clear_clip_hold_task is not None:
+            self._clear_clip_hold_task.kill()
+            self._clear_clip_hold_task = None
+
+    def _clear_command_state(self):
+        self._clear_clip_pressed = False
+        self._clear_clip_long_pressed = False
+        self._erase_pitch_modifier = False
+        self._kill_clear_clip_hold_task()
+
+    def _toggle_step_velocity_mode(self):
+        self._step_velocity_sensitive = not self._step_velocity_sensitive
+
+        if self._step_velocity_sensitive:
+            self._log_pad("[LPX-DRUM-VELOCITY] mode=sensitive")
+        else:
+            self._log_pad("[LPX-DRUM-VELOCITY] mode=fixed velocity=127")
+
+        self._update_layout()
+
+    def _on_clip_selector_value(self, local_index, physical_x, physical_y, value):
         local_track, local_scene = self._clip_selector_local_address(local_index)
         track_index = self._clip_window_track_offset + local_track
         scene_index = self._clip_window_scene_offset + local_scene
+
+        if value <= 0:
+            return
+
+        pressed_key = (track_index, scene_index)
+        selected_before = (
+            self._selected_track_index,
+            self._selected_scene_index,
+        )
         track = self._track_at_index(track_index)
         clip_slot = self._clip_slot_at_address(track_index, scene_index)
         has_clip = bool(liveobj_valid(clip_slot) and getattr(clip_slot, "has_clip", False))
@@ -664,12 +816,21 @@ class StaticDrumModeLayoutComponent(Component):
             )
         )
         self._log_clip_selector_color(track_index, scene_index, clip_slot)
+        self._exclude_clip_slot_from_scene_stop(clip_slot, scene_index)
+
+        if self._clip_selector_installing:
+            pass
+        elif pressed_key != selected_before:
+            pass
+        else:
+            self._toggle_clip_slot_playback(track, clip_slot, scene_index)
+
         self._update_layout()
         self._update_playhead()
 
     def _select_drum(self, drum_index):
         self._selected_drum_index = drum_index
-        self._selected_note = DRUM_BASE_NOTE + drum_index
+        self._selected_note = self._effective_note_for_drum_index(drum_index)
         self._log_pad(
             "[LPX-DRUM-SELECT] drum=D{:02d} note={}".format(
                 drum_index + 1,
@@ -678,7 +839,7 @@ class StaticDrumModeLayoutComponent(Component):
         )
         self._update_layout()
 
-    def _toggle_step(self, step_index):
+    def _toggle_step(self, step_index, velocity_value):
         clip = self._pattern_clip(create=True)
 
         if clip is None:
@@ -692,9 +853,17 @@ class StaticDrumModeLayoutComponent(Component):
             self._remove_step_note(clip, self._selected_note, step_time)
             action = "remove"
         else:
+            velocity = self._step_note_velocity(velocity_value)
             self._ensure_clip_can_accept_note_at(clip, step_time)
-            self._add_step_note(clip, self._selected_note, step_time)
+            self._add_step_note(clip, self._selected_note, step_time, velocity)
             action = "add"
+            self._log_pad(
+                "[LPX-DRUM-STEP] add step={} pitch={} velocity={}".format(
+                    step_name,
+                    self._selected_note,
+                    velocity,
+                )
+            )
 
         self._log_pad(
             "[LPX-DRUM-STEP] toggle step={} note={} action={} time={}".format(
@@ -705,6 +874,130 @@ class StaticDrumModeLayoutComponent(Component):
             )
         )
         self._normalize_clip_loop_length(clip, old_length=old_length)
+        self._update_layout()
+
+    def _clear_selected_clip_notes(self):
+        clip = self._pattern_clip(log_errors=False)
+
+        if clip is None:
+            return
+
+        old_length = self._clip_length_bars(clip)
+        self._remove_all_notes_in_clip(clip)
+        self._logged_step_onsets = set()
+        self._clear_playhead()
+        self._clear_active_drum_pitches()
+        self._normalize_clip_loop_length(clip, old_length=old_length)
+        self._log_pad(
+            "[LPX-DRUM-EDIT] clear clip track={} scene={}".format(
+                self._selected_track_index,
+                self._selected_scene_index,
+            )
+        )
+        self._update_layout()
+
+    def _erase_pitch_from_selected_bar(self, pitch):
+        clip = self._pattern_clip(log_errors=False)
+
+        if clip is None:
+            return
+
+        old_length = self._clip_length_bars(clip)
+        bar_start = self._bar_start_time(clip, self._selected_bar_index)
+        removed = len(self._notes_for_pitch_in_bar(clip, pitch, bar_start))
+        self._remove_notes_for_pitch_in_bar(clip, pitch, bar_start)
+        self._logged_step_onsets = set()
+        self._clear_playhead()
+        self._clear_active_drum_pitches()
+        self._normalize_clip_loop_length(clip, old_length=old_length)
+        self._log_pad(
+            "[LPX-DRUM-EDIT] erase_pitch bar={} pitch={} removed={}".format(
+                self._selected_bar_index + 1,
+                pitch,
+                removed,
+            )
+        )
+        self._update_layout()
+
+    def _erase_selected_bar(self, bar_index):
+        bar_index = max(0, min(BAR_COUNT - 1, int(bar_index)))
+        clip = self._pattern_clip(log_errors=False)
+
+        if clip is None:
+            return
+
+        old_length = self._clip_length_bars(clip)
+        bar_start = self._bar_start_time(clip, bar_index)
+        removed = len(self._notes_for_bar(clip, bar_start))
+        self._remove_notes_in_bar(clip, bar_start)
+        self._logged_step_onsets = set()
+        self._clear_playhead()
+        self._clear_active_drum_pitches()
+        self._normalize_clip_loop_length(clip, old_length=old_length)
+        self._log_pad(
+            "[LPX-DRUM-EDIT] erase_bar bar={} removed={}".format(
+                bar_index + 1,
+                removed,
+            )
+        )
+        self._update_layout()
+
+    def _copy_selected_bar_to_next_bar(self):
+        if self._selected_bar_index >= BAR_COUNT - 1:
+            self._log_pad(
+                "[LPX-DRUM-EDIT] copy ignored source_bar=8 reason=no_destination"
+            )
+            return
+
+        clip = self._pattern_clip(log_errors=False)
+
+        if clip is None:
+            return
+
+        old_length = self._clip_length_bars(clip)
+        source_bar = self._selected_bar_index
+        dest_bar = source_bar + 1
+        source_start = self._bar_start_time(clip, source_bar)
+        dest_start = self._bar_start_time(clip, dest_bar)
+        notes = self._notes_for_bar(clip, source_start)
+
+        self._remove_notes_in_bar(clip, dest_start)
+        if notes:
+            self._ensure_clip_can_accept_note_at(clip, dest_start + BAR_LENGTH - STEP_DURATION)
+        self._add_copied_notes_to_bar(clip, notes, source_start, dest_start)
+        self._normalize_clip_loop_length(clip, old_length=old_length)
+        self._logged_step_onsets = set()
+        self._log_pad(
+            "[LPX-DRUM-EDIT] copy source_bar={} dest_bar={} notes={}".format(
+                source_bar + 1,
+                dest_bar + 1,
+                len(notes),
+            )
+        )
+        self._update_layout()
+
+    def _change_drum_octave(self, delta):
+        new_offset = self._drum_octave_offset + int(delta)
+
+        if not self._octave_offset_is_valid(new_offset):
+            return
+
+        self._drum_octave_offset = new_offset
+        self._selected_note = self._effective_note_for_drum_index(
+            self._selected_drum_index
+        )
+        self._held_drum_notes = {}
+        self._clear_active_drum_pitches()
+        self._update_native_drum_routing()
+        low_note = self._effective_note_for_drum_index(0)
+        high_note = self._effective_note_for_drum_index(DRUM_NOTE_COUNT - 1)
+        self._log_pad(
+            "[LPX-DRUM-OCTAVE] offset={} range={}..{}".format(
+                self._drum_octave_offset,
+                low_note,
+                high_note,
+            )
+        )
         self._update_layout()
 
     def _start_playhead_task(self):
@@ -798,6 +1091,8 @@ class StaticDrumModeLayoutComponent(Component):
     def _clear_playhead(self):
         previous_step = self._playhead_step_index
         self._playhead_step_index = None
+        self._last_playback_position = None
+        self._last_playback_clip = None
         self._repaint_step(previous_step)
 
     def _current_playhead_step(self):
@@ -860,43 +1155,66 @@ class StaticDrumModeLayoutComponent(Component):
         clip = self._pattern_clip(log_errors=False)
 
         if clip is None:
+            self._last_playback_position = None
+            self._last_playback_clip = None
             return set()
 
         if not getattr(self.song, "is_playing", False) or not getattr(clip, "is_playing", False):
+            self._last_playback_position = None
+            self._last_playback_clip = None
             return set()
 
         try:
-            playing_position = float(clip.playing_position)
             loop_start = float(clip.loop_start)
             loop_end = float(clip.loop_end)
+            playing_position = self._position_in_loop(
+                float(clip.playing_position),
+                loop_start,
+                loop_end,
+            )
         except (AttributeError, RuntimeError, TypeError, ValueError):
+            self._last_playback_position = None
+            self._last_playback_clip = None
             return set()
 
-        active_pitches = set()
+        previous_position = self._last_playback_position
+
+        if clip != self._last_playback_clip:
+            previous_position = None
+
+        self._last_playback_clip = clip
+        self._last_playback_position = playing_position
+
+        if previous_position is None:
+            return set()
+
+        crossed_pitches = set()
 
         for note in self._drum_notes_for_loop(clip, loop_start, loop_end):
             try:
                 pitch = int(note.pitch)
                 note_start = float(note.start_time)
-                note_end = note_start + float(note.duration)
             except (AttributeError, RuntimeError, TypeError, ValueError):
                 continue
 
-            if self._note_is_active_at_position(
+            if self._onset_was_crossed(
                 note_start,
-                note_end,
-                playing_position,
+                previous_position,
+                self._position_in_loop(note_start, loop_start, loop_end),
                 loop_start,
                 loop_end,
             ):
-                active_pitches.add(pitch)
+                crossed_pitches.add(pitch)
+                self._log_active_drum_onset(pitch, note_start)
 
-        return active_pitches
+        return crossed_pitches
 
     def _drum_notes_for_loop(self, clip, loop_start, loop_end):
+        low_note = self._effective_note_for_drum_index(0)
+
         try:
             return clip.get_notes_extended(
-                DRUM_BASE_NOTE,
+                low_note,
                 DRUM_NOTE_COUNT,
                 loop_start,
                 max(STEP_DURATION, loop_end - loop_start),
@@ -904,15 +1222,22 @@ class StaticDrumModeLayoutComponent(Component):
         except (AttributeError, RuntimeError, TypeError):
             return ()
 
-    def _note_is_active_at_position(self, note_start, note_end, position, loop_start, loop_end):
+    def _position_in_loop(self, position, loop_start, loop_end):
+        loop_length = loop_end - loop_start
+
+        if loop_length <= 0.0:
+            return position
+
+        return loop_start + ((position - loop_start) % loop_length)
+
+    def _onset_was_crossed(self, note_start, previous_position, position, loop_start, loop_end):
         if loop_end <= loop_start:
             return False
 
-        if note_end <= loop_end:
-            return note_start <= position < note_end
+        if previous_position <= position:
+            return previous_position < note_start <= position
 
-        wrapped_end = loop_start + (note_end - loop_end)
-        return position >= note_start or position < wrapped_end
+        return previous_position < note_start < loop_end or loop_start <= note_start <= position
 
     def _update_active_drum_pitches(self, active_pitches):
         minimum_ticks = max(1, int(DRUM_FLASH_MIN_SECONDS / PLAYHEAD_REFRESH) + 1)
@@ -957,7 +1282,7 @@ class StaticDrumModeLayoutComponent(Component):
             self._log_active_drum("note_off", pitch)
 
     def _repaint_drum_pitch(self, pitch):
-        drum_index = pitch - DRUM_BASE_NOTE
+        drum_index = self._drum_index_for_effective_note(pitch)
 
         if drum_index < 0 or drum_index >= DRUM_NOTE_COUNT:
             return
@@ -977,11 +1302,24 @@ class StaticDrumModeLayoutComponent(Component):
         return None
 
     def _log_active_drum(self, action, pitch):
+        drum_index = self._drum_index_for_effective_note(pitch)
+
+        if drum_index < 0 or drum_index >= DRUM_NOTE_COUNT:
+            return
+
         self._log_pad(
             "[LPX-DRUM-ACTIVE] {} drum=D{:02d} note={}".format(
                 action,
-                pitch - DRUM_BASE_NOTE + 1,
+                drum_index + 1,
                 pitch,
+            )
+        )
+
+    def _log_active_drum_onset(self, pitch, note_start):
+        self._log_pad(
+            "[LPX-DRUM-ACTIVE] onset pitch={} time={}".format(
+                pitch,
+                note_start,
             )
         )
 
@@ -1078,6 +1416,10 @@ class StaticDrumModeLayoutComponent(Component):
             self._release_native_drum_routing()
             return
 
+        if self._erase_pitch_modifier:
+            self._release_native_drum_routing()
+            return
+
         track = self._selected_track()
 
         if not self._track_supports_midi(track):
@@ -1131,7 +1473,7 @@ class StaticDrumModeLayoutComponent(Component):
             if drum_index is None:
                 continue
 
-            current_buttons[button] = DRUM_BASE_NOTE + drum_index
+            current_buttons[button] = self._effective_note_for_drum_index(drum_index)
 
         for button in list(self._native_drum_buttons.keys()):
             if button not in current_buttons:
@@ -1317,6 +1659,44 @@ class StaticDrumModeLayoutComponent(Component):
         except (AttributeError, RuntimeError, TypeError):
             pass
 
+    def _toggle_clip_slot_playback(self, track, clip_slot, scene_index):
+        if (
+            not liveobj_valid(track)
+            or not liveobj_valid(clip_slot)
+            or not getattr(clip_slot, "has_clip", False)
+        ):
+            return
+
+        clip = clip_slot.clip
+
+        if not liveobj_valid(clip):
+            return
+
+        try:
+            if clip.is_playing:
+                clip.stop()
+            else:
+                clip_slot.fire()
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+
+    def _exclude_clip_slot_from_scene_stop(self, clip_slot, scene_index):
+        local_scene_index = scene_index - self._clip_window_scene_offset
+        scene_component = self._scene_component_for_local_scene(local_scene_index)
+        exclude_clip_slot_from_pending_scene_stop(
+            clip_slot,
+            scene_component=scene_component,
+        )
+
+    def _scene_component_for_local_scene(self, local_scene_index):
+        if self._surface is None:
+            return None
+
+        try:
+            return self._surface._session._scenes[int(local_scene_index)]
+        except (AttributeError, RuntimeError, TypeError, IndexError, ValueError):
+            return None
+
     def _target_track(self):
         if self._drum_bridge is None:
             return None
@@ -1331,33 +1711,180 @@ class StaticDrumModeLayoutComponent(Component):
         )
 
     def _step_has_note(self, clip, pitch, step_time):
+        step_end = step_time + STEP_DURATION
+
         for note in self._notes_for_step(clip, pitch, step_time):
-            if abs(float(note.start_time) - step_time) <= STEP_EPSILON:
+            try:
+                note_start = float(note.start_time)
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                continue
+
+            if step_time <= note_start < step_end:
+                self._log_step_onset(pitch, note_start, step_time)
                 return True
 
         return False
 
     def _notes_for_step(self, clip, pitch, step_time):
-        start_time = max(0.0, step_time - STEP_EPSILON)
-        time_span = STEP_EPSILON * 2.0
-
         try:
-            return clip.get_notes_extended(pitch, 1, start_time, time_span)
+            return clip.get_notes_extended(pitch, 1, step_time, STEP_DURATION)
         except (AttributeError, RuntimeError, TypeError):
             return ()
 
-    def _add_step_note(self, clip, pitch, step_time):
+    def _step_note_velocity(self, velocity_value):
+        if not self._step_velocity_sensitive:
+            return STEP_VELOCITY
+
+        try:
+            return max(1, min(127, int(velocity_value)))
+        except (TypeError, ValueError):
+            return STEP_VELOCITY
+
+    def _add_step_note(self, clip, pitch, step_time, velocity):
         note = Live.Clip.MidiNoteSpecification(
             pitch=int(pitch),
             start_time=float(step_time),
             duration=STEP_DURATION,
-            velocity=STEP_VELOCITY,
+            velocity=int(velocity),
         )
         clip.add_new_notes((note,))
 
     def _remove_step_note(self, clip, pitch, step_time):
-        start_time = max(0.0, step_time - STEP_EPSILON)
-        clip.remove_notes_extended(pitch, 1, start_time, STEP_EPSILON * 2.0)
+        clip.remove_notes_extended(pitch, 1, step_time, STEP_DURATION)
+        self._logged_step_onsets = set()
+
+    def _remove_all_notes_in_clip(self, clip):
+        try:
+            span = max(
+                BAR_LENGTH,
+                float(getattr(clip, "length", 0.0)),
+                float(getattr(clip, "end_marker", 0.0)),
+                float(getattr(clip, "loop_end", 0.0)),
+            )
+            clip.remove_notes_extended(0, 128, 0.0, span)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pass
+
+    def _bar_start_time(self, clip, bar_index):
+        return float(clip.loop_start) + max(0, int(bar_index)) * BAR_LENGTH
+
+    def _notes_for_pitch_in_bar(self, clip, pitch, bar_start):
+        try:
+            return tuple(clip.get_notes_extended(int(pitch), 1, bar_start, BAR_LENGTH))
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return ()
+
+    def _remove_notes_for_pitch_in_bar(self, clip, pitch, bar_start):
+        try:
+            clip.remove_notes_extended(int(pitch), 1, bar_start, BAR_LENGTH)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pass
+
+    def _notes_for_bar(self, clip, bar_start):
+        notes = []
+        bar_end = bar_start + BAR_LENGTH
+
+        try:
+            candidates = clip.get_notes_extended(0, 128, bar_start, BAR_LENGTH)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return notes
+
+        for note in candidates:
+            try:
+                note_start = float(note.start_time)
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                continue
+
+            if bar_start <= note_start < bar_end:
+                notes.append(note)
+
+        return notes
+
+    def _remove_notes_in_bar(self, clip, bar_start):
+        try:
+            clip.remove_notes_extended(0, 128, bar_start, BAR_LENGTH)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pass
+
+    def _add_copied_notes_to_bar(self, clip, notes, source_start, dest_start):
+        if not notes:
+            return
+
+        copied_notes = []
+
+        for note in notes:
+            copied_note = self._copy_note_to_start(note, source_start, dest_start)
+
+            if copied_note is not None:
+                copied_notes.append(copied_note)
+
+        if copied_notes:
+            try:
+                clip.add_new_notes(tuple(copied_notes))
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+
+    def _copy_note_to_start(self, note, source_start, dest_start):
+        try:
+            kwargs = dict(
+                pitch=int(note.pitch),
+                start_time=float(dest_start) + (float(note.start_time) - float(source_start)),
+                duration=float(note.duration),
+                velocity=int(note.velocity),
+            )
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return None
+
+        for name in (
+            "mute",
+            "probability",
+            "velocity_deviation",
+            "release_velocity",
+        ):
+            if hasattr(note, name):
+                kwargs[name] = getattr(note, name)
+
+        while True:
+            try:
+                return Live.Clip.MidiNoteSpecification(**kwargs)
+            except TypeError:
+                optional_names = [
+                    name
+                    for name in (
+                        "mute",
+                        "probability",
+                        "velocity_deviation",
+                        "release_velocity",
+                    )
+                    if name in kwargs
+                ]
+
+                if not optional_names:
+                    return None
+
+                del kwargs[optional_names[-1]]
+
+    def _log_step_onset(self, pitch, note_start, step_time):
+        try:
+            clip = self._pattern_clip(log_errors=False)
+            selected_bar_start = float(clip.loop_start) + self._selected_bar_index * BAR_LENGTH
+            step_index = int((step_time - selected_bar_start) / STEP_DURATION)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            step_index = None
+
+        key = (pitch, note_start, step_index)
+
+        if key in self._logged_step_onsets:
+            return
+
+        self._logged_step_onsets.add(key)
+        self._log_pad(
+            "[LPX-DRUM-NOTE] step pitch={} onset={} step={}".format(
+                pitch,
+                note_start,
+                step_index,
+            )
+        )
 
     def _ensure_clip_can_accept_note_at(self, clip, step_time):
         try:
@@ -1483,7 +2010,8 @@ class StaticDrumModeLayoutComponent(Component):
 
     def _color_for_coordinate(self, x, y):
         if y == 7:
-            return OFF_COLOR
+            command_index = self._command_index_for_coordinate(x, y)
+            return self._color_for_command_index(command_index)
 
         if y == 6:
             bar_index = self._bar_index_for_coordinate(x, y)
@@ -1545,6 +2073,13 @@ class StaticDrumModeLayoutComponent(Component):
         clip = clip_slot.clip if has_clip else None
         is_playing = bool(liveobj_valid(clip) and getattr(clip, "is_playing", False))
         is_triggered = bool(liveobj_valid(clip) and getattr(clip, "is_triggered", False))
+        is_stop_triggered = self._clip_selector_stop_is_triggered(
+            track_index,
+            scene_index,
+        )
+
+        if is_stop_triggered:
+            return "Session.StopClipTriggered"
 
         if is_triggered:
             return CLIP_SELECTOR_TRIGGERED_COLOR
@@ -1564,6 +2099,20 @@ class StaticDrumModeLayoutComponent(Component):
             return Blink(base_color, Color(Rgb.WHITE.midi_value))
 
         return base_color
+
+    def _clip_selector_stop_is_triggered(self, track_index, scene_index):
+        track = self._track_at_index(track_index)
+
+        if not liveobj_valid(track):
+            return False
+
+        try:
+            return (
+                track.fired_slot_index == -2
+                and track.playing_slot_index == scene_index
+            )
+        except (AttributeError, RuntimeError, TypeError):
+            return False
 
     def _clip_selector_base_color(self, clip_slot, clip):
         if not liveobj_valid(clip):
@@ -1617,15 +2166,95 @@ class StaticDrumModeLayoutComponent(Component):
         if drum_index is None:
             return DRUM_COLOR
 
-        pitch = DRUM_BASE_NOTE + drum_index
+        base_color = self._base_color_for_drum_index(drum_index)
+
+        if drum_index == self._selected_drum_index:
+            return Blink(DRUM_SELECTED_BLINK_COLOR, base_color)
+
+        return base_color
+
+    def _base_color_for_drum_index(self, drum_index):
+        pitch = self._effective_note_for_drum_index(drum_index)
 
         if pitch in self._displayed_active_drum_pitches:
             return DRUM_PLAYBACK_COLOR
 
-        if drum_index == self._selected_drum_index:
-            return DRUM_SELECTED_COLOR
+        if self._drum_pitch_has_notes(pitch):
+            return DRUM_PLAYBACK_COLOR
 
         return DRUM_COLOR
+
+    def _drum_pitch_has_notes(self, pitch):
+        clip = self._pattern_clip(log_errors=False)
+
+        if clip is None:
+            return False
+
+        try:
+            return bool(
+                clip.get_notes_extended(
+                    int(pitch),
+                    1,
+                    float(clip.loop_start),
+                    BAR_COUNT * BAR_LENGTH,
+                )
+            )
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return False
+
+    def _command_index_for_coordinate(self, x, y):
+        if y != 7:
+            return None
+
+        return max(0, min(7, int(x)))
+
+    def _color_for_command_index(self, command_index):
+        if command_index == 0:
+            return COMMAND_CLEAR_COLOR
+
+        if command_index == 1:
+            return COMMAND_ERASE_COLOR
+
+        if command_index == 2:
+            return COMMAND_COPY_COLOR
+
+        if command_index == 5:
+            return (
+                COMMAND_VELOCITY_SENSITIVE_COLOR
+                if self._step_velocity_sensitive
+                else COMMAND_VELOCITY_FIXED_COLOR
+            )
+
+        if command_index in (6, 7):
+            return self._color_for_octave_command_index(command_index)
+
+        return OFF_COLOR
+
+    def _color_for_octave_command_index(self, command_index):
+        if command_index == 6:
+            return (
+                COMMAND_OCTAVE_ACTIVE_COLOR
+                if self._drum_octave_offset < 0
+                else COMMAND_OCTAVE_DEFAULT_COLOR
+            )
+
+        return (
+            COMMAND_OCTAVE_ACTIVE_COLOR
+            if self._drum_octave_offset > 0
+            else COMMAND_OCTAVE_DEFAULT_COLOR
+        )
+
+    def _effective_note_for_drum_index(self, drum_index):
+        return DRUM_BASE_NOTE + int(drum_index) + self._drum_octave_offset * 12
+
+    def _drum_index_for_effective_note(self, pitch):
+        return int(pitch) - self._effective_note_for_drum_index(0)
+
+    def _octave_offset_is_valid(self, offset):
+        return (
+            DRUM_BASE_NOTE + offset * 12 >= 0
+            and DRUM_BASE_NOTE + (DRUM_NOTE_COUNT - 1) + offset * 12 <= 127
+        )
 
     def _step_index_for_coordinate(self, x, y):
         if y < 4 or y > 5:
@@ -1717,6 +2346,7 @@ class StaticDrumModeLayoutComponent(Component):
         )
 
     def disconnect(self):
+        self._clear_command_state()
         self._stop_playhead_task()
         self._stop_bar_blink_task()
         self._clear_active_drum_pitches()
@@ -1726,4 +2356,5 @@ class StaticDrumModeLayoutComponent(Component):
         self._remove_drum_pad_listeners()
         self._remove_step_pad_listeners()
         self._remove_bar_pad_listeners()
+        self._remove_command_pad_listeners()
         super(StaticDrumModeLayoutComponent, self).disconnect()

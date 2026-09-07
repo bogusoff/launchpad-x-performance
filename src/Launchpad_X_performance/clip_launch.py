@@ -4,6 +4,11 @@ from ableton.v2.control_surface.components.clip_slot import ClipSlotComponent
 
 from .clip_launch_pending import handle_queued_launch, swallow_pending_launch_release
 from .clip_stop import handle_clip_stop
+from .scene_stop import (
+    handle_pending_scene_clip_override,
+    pending_scene_lookup_for_clip_component,
+)
+from .session_global import handle_session_global_clip_override
 
 
 _original_do_launch_clip = ClipSlotComponent._do_launch_clip
@@ -56,6 +61,26 @@ def performance_do_launch_clip(self, fire_state):
     if surface is None:
         return _original_do_launch_clip(self, fire_state)
 
+    pending_scene_lookup = pending_scene_lookup_for_clip_component(self)
+    pending_scene = pending_scene_lookup["found"]
+    pending_state = pending_scene_lookup["state"]
+
+    if fire_state and pending_scene:
+        handled = handle_pending_scene_clip_override(
+            self,
+            pending_state,
+            pending_lookup=pending_scene_lookup,
+        )
+
+        if handled:
+            return
+
+    if not fire_state:
+        handled = handle_pending_scene_clip_override(self, None, fire_state=False)
+
+        if handled:
+            return
+
     if fire_state:
         slot = self._clip_slot
         recording = surface._performance_fixed_length_recording
@@ -65,6 +90,12 @@ def performance_do_launch_clip(self, fire_state):
             return
 
     if swallow_pending_launch_release(
+        self,
+        fire_state,
+    ):
+        return
+
+    if handle_session_global_clip_override(
         self,
         fire_state,
     ):
