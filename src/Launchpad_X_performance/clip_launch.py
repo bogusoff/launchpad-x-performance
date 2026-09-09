@@ -81,6 +81,12 @@ def performance_do_launch_clip(self, fire_state):
         if handled:
             return
 
+    if surface._performance_sequential_record.handle_clip_launch(
+        self,
+        fire_state,
+    ):
+        return
+
     if fire_state:
         slot = self._clip_slot
         recording = surface._performance_fixed_length_recording

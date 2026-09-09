@@ -14,7 +14,7 @@ class PerformanceFixedLengthManager(object):
         return (
             self._surface._main_modes.selected_mode == "session"
             and self._surface._session_modes.selected_mode == "mixer"
-            and self._surface._mixer_modes.selected_mode == "arm"
+            and self._surface._mixer_modes.selected_mode in ("arm", "solo")
         )
     def _refresh(self):
         enabled = self._overlay_should_be_enabled()

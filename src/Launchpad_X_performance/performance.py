@@ -11,6 +11,7 @@ from .fixed_length_manager import PerformanceFixedLengthManager
 from .launchpad_x import Launchpad_X
 from .mixer_stop import install_mixer_side_stop
 from .scene_stop import install_scene_stop
+from .sequential_record import SequentialRecordManager
 from .session_global import install_session_global_actions
 
 class Launchpad_X_Performance(Launchpad_X):
@@ -34,6 +35,11 @@ class Launchpad_X_Performance(Launchpad_X):
             surface=self,
             component=self._performance_fixed_length,
         )
+        self._performance_sequential_record = SequentialRecordManager(
+            surface=self,
+            fixed_length_setting=self._performance_fixed_length_setting,
+            task_group=self._tasks,
+        )
         self._performance_drum_bridge = LPXDrumBridgeManager(surface=self)
         self._performance_drum_mode_layout = StaticDrumModeLayoutComponent(
             name="Performance_Drum_Mode_Static_Layout",
@@ -47,6 +53,11 @@ class Launchpad_X_Performance(Launchpad_X):
         )
 
     def disconnect(self):
+        try:
+            self._performance_sequential_record.disconnect()
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+
         try:
             self._performance_drum_mode_layout_manager.disconnect()
         except (AttributeError, RuntimeError, TypeError):
