@@ -3,7 +3,10 @@ from __future__ import absolute_import, print_function, unicode_literals
 from ableton.v2.base import liveobj_valid, task
 import ableton.v2.control_surface.mode as mode_module
 
-from .scene_stop import SCENE_HOLD_SECONDS, queue_scene_stop
+from .scene_stop import _queue_scene_action, _SCENE_ACTION_STOP
+
+
+MIXER_SIDE_HOLD_SECONDS = 0.7
 
 
 MIXER_SIDE_SCENE_INDICES = {
@@ -85,7 +88,7 @@ def _queue_stop_for_scene(surface, local_scene_index):
     if scene_component is None or not liveobj_valid(getattr(scene_component, "_scene", None)):
         return 0
 
-    return queue_scene_stop(scene_component)
+    return int(bool(_queue_scene_action(scene_component, _SCENE_ACTION_STOP)))
 
 
 def _kill_hold_state(state):
@@ -128,7 +131,7 @@ class MixerSideStopBehaviour(object):
             "task": None,
         }
 
-        def _stop_scene_if_still_held():
+        def _stop_mixer_scene_if_still_held():
             if state is not getattr(component, _HOLD_STATE_ATTR, None):
                 _kill_hold_state(state)
                 return
@@ -156,8 +159,8 @@ class MixerSideStopBehaviour(object):
             )
 
         hold_task = task.sequence(
-            task.wait(SCENE_HOLD_SECONDS),
-            task.run(_stop_scene_if_still_held),
+            task.wait(MIXER_SIDE_HOLD_SECONDS),
+            task.run(_stop_mixer_scene_if_still_held),
         )
         state["task"] = hold_task
         setattr(component, _HOLD_STATE_ATTR, state)

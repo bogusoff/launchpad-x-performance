@@ -8,17 +8,12 @@ from .clip_stop import (
     _next_boundary,
     _quantization_length,
     _safe_immediate_track_stop,
-    queue_clip_stop,
 )
-
-
-SCENE_HOLD_SECONDS = 0.7
 
 
 _original_do_launch_scene = SceneComponent._do_launch_scene
 _installed = False
 _PENDING_SCENE_ACTION_ATTR = "_performance_scene_pending_action"
-_SWALLOW_SCENE_RELEASE_ATTR = "_performance_scene_swallow_release"
 _SCENE_ACTION_REFRESH = 0.01
 _SCENE_ACTION_STOP = "stop"
 _SCENE_ACTION_START = "start"
@@ -47,26 +42,6 @@ def _belongs_to_performance_surface(component):
         current = parent
 
     return False
-
-
-def queue_scene_stop(scene_component):
-    queued_clips = 0
-
-    for clip_component in scene_component._clip_slots:
-        clip_slot = getattr(clip_component, "_clip_slot", None)
-
-        if not liveobj_valid(clip_slot) or not clip_component.has_clip():
-            continue
-
-        clip = clip_slot.clip
-
-        if not clip.is_playing:
-            continue
-
-        if queue_clip_stop(clip_component):
-            queued_clips += 1
-
-    return queued_clips
 
 
 def _scene_has_playing_clips(scene_component):
@@ -806,74 +781,13 @@ def _scene_restart_or_stop(self, value):
 
     if value:
         if _toggle_pending_scene_action(self):
-            setattr(self, _SWALLOW_SCENE_RELEASE_ATTR, True)
             return
 
-        previous_task = getattr(
-            self,
-            "_performance_scene_hold_task",
-            None,
-        )
+        if _scene_has_playing_clips(self):
+            _queue_scene_action(self, _SCENE_ACTION_STOP)
+            return
 
-        if previous_task is not None:
-            previous_task.kill()
-
-        self._performance_scene_pressed = True
-        self._performance_scene_long_pressed = False
-
-        def _stop_scene_if_still_held():
-            if not getattr(self, "_performance_scene_pressed", False):
-                return
-
-            self._performance_scene_long_pressed = True
-            queue_scene_stop(self)
-
-        hold_task = self._tasks.add(
-            task.sequence(
-                task.wait(SCENE_HOLD_SECONDS),
-                task.run(_stop_scene_if_still_held),
-            )
-        )
-
-        self._performance_scene_hold_task = hold_task
-        return
-
-    if getattr(self, _SWALLOW_SCENE_RELEASE_ATTR, False):
-        setattr(self, _SWALLOW_SCENE_RELEASE_ATTR, False)
-        self._performance_scene_pressed = False
-        hold_task = getattr(self, "_performance_scene_hold_task", None)
-
-        if hold_task is not None:
-            hold_task.kill()
-
-        self._performance_scene_hold_task = None
-        return
-
-    if not getattr(self, "_performance_scene_pressed", False):
-        return
-
-    self._performance_scene_pressed = False
-
-    hold_task = getattr(
-        self,
-        "_performance_scene_hold_task",
-        None,
-    )
-
-    if hold_task is not None:
-        hold_task.kill()
-
-    self._performance_scene_hold_task = None
-
-    if getattr(self, "_performance_scene_long_pressed", False):
-        self._performance_scene_long_pressed = False
-        return
-
-    if _scene_has_playing_clips(self):
-        _queue_scene_action(self, _SCENE_ACTION_STOP)
-        return
-
-    _queue_scene_action(self, _SCENE_ACTION_START)
+        _queue_scene_action(self, _SCENE_ACTION_START)
 
 
 def install_scene_stop():

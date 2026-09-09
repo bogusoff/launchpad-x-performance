@@ -8,7 +8,7 @@ from ableton.v2.control_surface.components.clip_slot import find_nearest_color
 from ableton.v2.control_surface.elements import Color
 from novation.colors import Blink, CLIP_COLOR_TABLE, RGB_COLOR_TABLE, Rgb
 
-from .scene_stop import SCENE_HOLD_SECONDS, exclude_clip_slot_from_pending_scene_stop
+from .scene_stop import exclude_clip_slot_from_pending_scene_stop
 
 
 CLIP_SELECTOR_EMPTY_COLOR = Color(0)
@@ -54,6 +54,7 @@ BAR_LENGTH = 4.0
 BAR_COUNT = 8
 BAR_BLINK_REFRESH = 0.35
 DRUM_FLASH_MIN_SECONDS = 0.06
+CLEAR_CLIP_HOLD_SECONDS = 0.7
 
 
 class DrumModeLayoutManager(object):
@@ -740,7 +741,7 @@ class StaticDrumModeLayoutComponent(Component):
 
             self._clear_clip_hold_task = self._tasks.add(
                 task.sequence(
-                    task.wait(SCENE_HOLD_SECONDS),
+                    task.wait(CLEAR_CLIP_HOLD_SECONDS),
                     task.run(self._clear_clip_if_still_held),
                 )
             )
