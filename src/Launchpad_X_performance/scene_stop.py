@@ -70,10 +70,11 @@ def queue_scene_stop(scene_component):
 
 
 def _scene_has_playing_clips(scene_component):
-    for clip_component in scene_component._clip_slots:
-        clip_slot = getattr(clip_component, "_clip_slot", None)
+    song = scene_component.song
+    scene_index = _scene_index_for_component(scene_component)
 
-        if not liveobj_valid(clip_slot) or not clip_component.has_clip():
+    for _, clip_slot in _scene_clip_slots_for_all_tracks(song, scene_index):
+        if not liveobj_valid(clip_slot) or not clip_slot.has_clip:
             continue
 
         clip = clip_slot.clip
@@ -86,17 +87,14 @@ def _scene_has_playing_clips(scene_component):
 
 def _scene_clip_actions_for_stop(scene_component):
     clip_actions = {}
+    song = scene_component.song
+    scene_index = _scene_index_for_component(scene_component)
 
-    for clip_component in scene_component._clip_slots:
-        clip_slot = getattr(clip_component, "_clip_slot", None)
-        clip_slot_key = _clip_slot_key(scene_component.song, clip_slot)
-
-        if clip_slot_key is None:
-            continue
-
+    for track_index, clip_slot in _scene_clip_slots_for_all_tracks(song, scene_index):
+        clip_slot_key = (track_index, scene_index)
         action = None
 
-        if liveobj_valid(clip_slot) and clip_component.has_clip():
+        if liveobj_valid(clip_slot) and clip_slot.has_clip:
             clip = clip_slot.clip
 
             if liveobj_valid(clip) and (clip.is_playing or clip.is_triggered):
@@ -109,22 +107,42 @@ def _scene_clip_actions_for_stop(scene_component):
 
 def _scene_clip_actions_for_start(scene_component):
     clip_actions = {}
+    song = scene_component.song
+    scene_index = _scene_index_for_component(scene_component)
 
-    for clip_component in scene_component._clip_slots:
-        clip_slot = getattr(clip_component, "_clip_slot", None)
-        clip_slot_key = _clip_slot_key(scene_component.song, clip_slot)
-
-        if clip_slot_key is None:
-            continue
-
+    for track_index, clip_slot in _scene_clip_slots_for_all_tracks(song, scene_index):
+        clip_slot_key = (track_index, scene_index)
         action = None
 
-        if liveobj_valid(clip_slot) and clip_component.has_clip():
+        if liveobj_valid(clip_slot) and clip_slot.has_clip:
             action = _SCENE_ACTION_START
+        elif _clip_slot_has_stop_button(clip_slot):
+            action = _SCENE_ACTION_STOP
 
         clip_actions[clip_slot_key] = action
 
     return clip_actions
+
+
+def _scene_clip_slots_for_all_tracks(song, scene_index):
+    if scene_index < 0:
+        return
+
+    try:
+        tracks = song.tracks
+    except (AttributeError, RuntimeError, TypeError):
+        return
+
+    for track_index, track in enumerate(tracks):
+        if not liveobj_valid(track):
+            continue
+
+        try:
+            clip_slot = track.clip_slots[scene_index]
+        except (AttributeError, RuntimeError, TypeError, IndexError):
+            continue
+
+        yield track_index, clip_slot
 
 
 def _track_index(song, track):
@@ -165,6 +183,19 @@ def _clip_slot_key(song, clip_slot):
         return None
 
     return (track_index, scene_index)
+
+
+def _clip_slot_has_stop_button(clip_slot):
+    if not liveobj_valid(clip_slot):
+        return False
+
+    for property_name in ("has_stop_button", "controls_other_clips"):
+        try:
+            return bool(getattr(clip_slot, property_name))
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+
+    return False
 
 
 def _kill_scene_action_task(state):
@@ -214,6 +245,17 @@ def _performance_surface_for_component(component):
 
 
 def _scene_index_for_component(scene_component):
+    song = getattr(scene_component, "song", None)
+    scene = getattr(scene_component, "_scene", None)
+
+    if song is not None and liveobj_valid(scene):
+        try:
+            for index, candidate in enumerate(song.scenes):
+                if candidate == scene:
+                    return index
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+
     surface = _performance_surface_for_component(scene_component)
 
     if surface is None:
@@ -571,46 +613,78 @@ def _pending_scene_action_is_current(scene_component, state):
 
 
 def _execute_scene_stop(scene_component, clip_actions=None):
+    if clip_actions is not None:
+        for clip_slot_key, action in clip_actions.items():
+            if action != _SCENE_ACTION_STOP:
+                continue
+
+            clip_slot = _clip_slot_for_key(scene_component.song, clip_slot_key)
+            _execute_clip_slot_stop(clip_slot)
+
+        return
+
     for clip_component in scene_component._clip_slots:
         clip_slot = getattr(clip_component, "_clip_slot", None)
-        clip_slot_key = _clip_slot_key(scene_component.song, clip_slot)
+        _execute_clip_slot_stop(clip_slot, playing_only=True)
 
-        if clip_actions is not None and clip_actions.get(clip_slot_key) != _SCENE_ACTION_STOP:
-            continue
 
-        if not liveobj_valid(clip_slot) or not clip_component.has_clip():
-            continue
+def _execute_clip_slot_stop(clip_slot, playing_only=False):
+    if not liveobj_valid(clip_slot):
+        return
 
-        clip = clip_slot.clip
-
-        if not liveobj_valid(clip):
-            continue
-
-        if clip_actions is None and not clip.is_playing:
-            continue
-
-        if liveobj_valid(clip):
+    if not clip_slot.has_clip:
+        if _clip_slot_has_stop_button(clip_slot):
             _safe_immediate_track_stop(clip_slot.canonical_parent)
+
+        return
+
+    clip = clip_slot.clip
+
+    if not liveobj_valid(clip):
+        return
+
+    if playing_only and not clip.is_playing:
+        return
+
+    _safe_immediate_track_stop(clip_slot.canonical_parent)
 
 
 def _execute_scene_start(scene_component, clip_actions=None):
+    if clip_actions is not None:
+        for clip_slot_key, action in clip_actions.items():
+            if action != _SCENE_ACTION_START:
+                continue
+
+            clip_slot = _clip_slot_for_key(scene_component.song, clip_slot_key)
+            _execute_clip_slot_start(clip_slot)
+
+        return
+
     for clip_component in scene_component._clip_slots:
         clip_slot = getattr(clip_component, "_clip_slot", None)
-        clip_slot_key = _clip_slot_key(scene_component.song, clip_slot)
+        _execute_clip_slot_start(clip_slot)
 
-        if clip_actions is not None and clip_actions.get(clip_slot_key) != _SCENE_ACTION_START:
-            continue
 
-        if not liveobj_valid(clip_slot) or not clip_component.has_clip():
-            continue
+def _execute_clip_slot_start(clip_slot):
+    if not liveobj_valid(clip_slot) or not clip_slot.has_clip:
+        return
 
+    try:
+        clip_slot.fire(launch_quantization=Live.Song.Quantization.q_no_q)
+    except (AttributeError, RuntimeError, TypeError):
         try:
-            clip_slot.fire(launch_quantization=Live.Song.Quantization.q_no_q)
+            clip_slot.fire()
         except (AttributeError, RuntimeError, TypeError):
-            try:
-                clip_slot.fire()
-            except (AttributeError, RuntimeError, TypeError):
-                pass
+            pass
+
+
+def _clip_slot_for_key(song, clip_slot_key):
+    try:
+        track_index, scene_index = clip_slot_key
+        track = song.tracks[track_index]
+        return track.clip_slots[scene_index]
+    except (AttributeError, RuntimeError, TypeError, IndexError):
+        return None
 
 
 def _execute_scene_clip_actions(scene_component, clip_actions):
