@@ -20,12 +20,6 @@ The script does not replace or modify the original Launchpad X files. The extra 
 
 ---
 
-## 🎥 Демонстрация / Demo
-
-https://youtu.be/iwC-g0I7ADQ?si=ZVzq5mLxWfpZIt2y
-
----
-
 # Возможности / Features
 
 ## Quantized Clip Stop
@@ -33,8 +27,6 @@ https://youtu.be/iwC-g0I7ADQ?si=ZVzq5mLxWfpZIt2y
 **🇷🇺** Повторное нажатие на играющий клип ставит его в очередь на остановку по **Global Quantization** Ableton Live. Пока остановка ожидает музыкальной границы, кнопка клипа показывает состояние очереди.
 
 **🇬🇧** Pressing a playing clip a second time queues it for stopping according to Ableton Live's **Global Quantization**, with pending-state LED feedback.
-
-![Quantized Clip Stop](docs/gifs/quantized_clip_stop.gif)
 
 ## Scene Launch & Scene Hold Stop
 
@@ -46,15 +38,11 @@ https://youtu.be/iwC-g0I7ADQ?si=ZVzq5mLxWfpZIt2y
 
 Holding a Scene Launch button queues the scene for stopping according to **Global Quantization**, while a short press keeps normal scene-launch behavior.
 
-![Scene Hold Stop](docs/gifs/scene_hold_stop.gif)
-
 ## Fixed Length Recording
 
 **🇷🇺** Перед записью можно выбрать фиксированную длину нового клипа от **1 до 16 тактов**. Выбранное значение сохраняется между переключениями режимов и используется при записи новых клипов.
 
 **🇬🇧** Select a fixed recording length from **1 to 16 bars** before recording. The selected value is preserved between mode changes and is used for new clip recordings.
-
-![Fixed Length Recording](docs/gifs/fixed_length_recording.gif)
 
 ## Sequential Record
 
@@ -83,8 +71,6 @@ This is designed for quickly building two related performance sections — for e
 **🇷🇺** На вооружённой дорожке клип можно удалить удержанием его кнопки. Короткое нажатие сохраняет обычное поведение, поэтому риск случайного удаления материала во время выступления ниже.
 
 **🇬🇧** On an armed track, a clip can be deleted by holding its pad. A short press keeps normal clip behavior, reducing the risk of accidental deletion during performance.
-
-![Long Press Clip Delete](docs/gifs/long_press_delete.gif)
 
 ## Dynamic Track Mapping / Drum Mode
 
@@ -150,9 +136,9 @@ CLIP_DELETE_HOLD_SECONDS = 0.7
 | macOS | ✅ |
 | Windows 11 | ✅ |
 
-Текущая development-версия протестирована вручную в Ableton Live 12.4.x. Основной рабочий тест выполняется на macOS; Windows также поддерживается установочными скриптами проекта.
+Версия **v1.2.0** протестирована вручную в Ableton Live 12.4.x. Основной рабочий тест выполнялся на macOS; Windows также поддерживается установочными скриптами проекта.
 
-The current development version has been manually tested with Ableton Live 12.4.x. The primary development/test environment is macOS; Windows is also supported by the project's installation scripts.
+Version **v1.2.0** has been manually tested with Ableton Live 12.4.x. The primary development/test environment is macOS; Windows is also supported by the project's installation scripts.
 
 ---
 
@@ -235,20 +221,43 @@ uninstall_windows.bat
 
 ---
 
-# Текущий статус / Current status
+# v1.2.0
 
-Ветка `feature/drum-pad-v2` содержит текущую протестированную performance-версию, включая Sequential Record, синхронизацию track mapping и обновлённое Scene Launch behavior. Перед публикацией релиза эта версия проходит ручную проверку в реальном Live Set.
+## 🇷🇺
 
-The `feature/drum-pad-v2` branch contains the current tested performance build, including Sequential Record, dynamic track mapping synchronization, and updated Scene Launch behavior. The build is manually verified in a real Live Set before release.
+Крупное обновление performance-логики Launchpad X Performance.
 
-## Recent changes
+### Добавлено
 
-- Sequential fixed-length recording workflow.
+- **Sequential Record** в режиме Solo: последовательная запись двух связанных частей на одной дорожке.
+- Общая настройка Fixed Length для Arm и Solo workflows.
+- Расширенная логика Scene Launch по всем обычным дорожкам Live Set, включая дорожки вне видимого Session Ring.
+- Динамическая синхронизация track mapping при добавлении и удалении дорожек.
+
+### Исправлено и улучшено
+
+- Scene Launch теперь сохраняет семантику Stop Button в пустых слотах: Stop Button останавливает предыдущий клип, удалённый Stop Button позволяет ему продолжать играть.
+- Используется абсолютный индекс сцены при вертикальном смещении Session Ring.
+- Drum Mode сохраняет правильную привязку к Live Track после изменения структуры проекта.
+- Сохранены квантованные queued launch/stop и long-press performance controls.
+
+## 🇬🇧
+
+Major update to the Launchpad X Performance live-performance workflow.
+
+### Added
+
+- **Sequential Record** in Solo mode for recording two related sections on the same track.
 - Shared Fixed Length setting between Arm and Solo workflows.
-- Dynamic track mapping after adding/removing Live tracks.
-- Scene Launch across all regular `song.tracks`, including tracks outside the visible Session Ring.
-- Native-like empty-slot Stop Button semantics.
-- Absolute scene indexing when the Session Ring is vertically offset.
+- Extended Scene Launch across all regular Live Set tracks, including tracks outside the visible Session Ring.
+- Dynamic track-mapping synchronization when tracks are added or removed.
+
+### Fixed and improved
+
+- Scene Launch now preserves empty-slot Stop Button semantics: a Stop Button stops the previous clip, while a removed Stop Button allows it to continue.
+- Absolute scene indexing is used when the Session Ring is vertically offset.
+- Drum Mode stays attached to the correct Live Track after project structure changes.
+- Quantized queued launch/stop and long-press performance controls remain preserved.
 
 ---
 
