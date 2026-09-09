@@ -168,6 +168,7 @@ class StaticDrumModeLayoutComponent(Component):
         self._clip_slot_listeners = []
         self._clip_content_listeners = []
         self._track_state_listeners = []
+        self._song_track_listeners = []
         self._observed_clip_slots = []
         self._observed_tracks = []
         self._drum_pad_listeners = []
@@ -189,6 +190,7 @@ class StaticDrumModeLayoutComponent(Component):
         self._clip_window_track_offset = 0
         self._clip_window_scene_offset = 0
         self._selected_track_index = INITIAL_TRACK_INDEX
+        self._selected_track_object = None
         self._selected_scene_index = INITIAL_SCENE_INDEX
         self._selected_bar_index = 0
         self._playhead_task = None
@@ -203,6 +205,7 @@ class StaticDrumModeLayoutComponent(Component):
 
     def set_native_routing_surface(self, surface):
         self._surface = surface
+        self._install_song_track_listener()
 
     def set_drum_pad_logger(self, logger):
         self._drum_pad_logger = logger
@@ -229,6 +232,28 @@ class StaticDrumModeLayoutComponent(Component):
         self._update_clip_slot_listeners()
         self._update_track_state_listeners()
         self._update_layout()
+
+    def _install_song_track_listener(self):
+        self._remove_song_track_listener()
+        self._add_object_listener(
+            self.song,
+            "tracks",
+            self._on_song_tracks_changed,
+            self._song_track_listeners,
+        )
+
+    def _remove_song_track_listener(self):
+        self._remove_object_listeners(self._song_track_listeners)
+        self._song_track_listeners = []
+
+    def _on_song_tracks_changed(self):
+        self._sync_selected_track_after_tracks_changed()
+        self._remove_clip_slot_listeners()
+        self._update_clip_slot_listeners()
+        self._update_track_state_listeners()
+        self._update_native_drum_routing()
+        self._update_layout()
+        self._update_playhead()
 
     def set_matrix(self, matrix):
         if matrix != self._matrix:
@@ -786,6 +811,7 @@ class StaticDrumModeLayoutComponent(Component):
         has_clip = bool(liveobj_valid(clip_slot) and getattr(clip_slot, "has_clip", False))
         is_midi = self._track_supports_midi(track)
         self._selected_track_index = track_index
+        self._selected_track_object = track
         self._selected_scene_index = scene_index
         self._clear_playhead()
         self._highlight_clip_slot(track, clip_slot)
@@ -1409,7 +1435,39 @@ class StaticDrumModeLayoutComponent(Component):
             return False
 
     def _selected_track(self):
-        return self._track_at_index(self._selected_track_index)
+        track = self._selected_track_object
+
+        if liveobj_valid(track):
+            track_index = self._track_index(track)
+
+            if track_index is not None:
+                self._selected_track_index = track_index
+                return track
+
+        track = self._track_at_index(self._selected_track_index)
+        self._selected_track_object = track
+        return track
+
+    def _sync_selected_track_after_tracks_changed(self):
+        track = self._selected_track_object
+
+        if liveobj_valid(track):
+            track_index = self._track_index(track)
+
+            if track_index is not None:
+                self._selected_track_index = track_index
+                return
+
+        tracks = getattr(self.song, "tracks", ())
+        max_index = len(tracks) - 1
+
+        if max_index < 0:
+            self._selected_track_index = INITIAL_TRACK_INDEX
+            self._selected_track_object = None
+            return
+
+        self._selected_track_index = max(0, min(self._selected_track_index, max_index))
+        self._selected_track_object = self._track_at_index(self._selected_track_index)
 
     def _update_native_drum_routing(self):
         if self._matrix is None or not self.is_enabled():
@@ -2354,6 +2412,7 @@ class StaticDrumModeLayoutComponent(Component):
         self._remove_clip_slot_listeners()
         self._remove_track_state_listeners()
         self._remove_drum_pad_listeners()
+        self._remove_song_track_listener()
         self._remove_step_pad_listeners()
         self._remove_bar_pad_listeners()
         self._remove_command_pad_listeners()
