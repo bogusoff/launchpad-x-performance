@@ -28,15 +28,15 @@ The script does not replace or modify the original Launchpad X files. The extra 
 
 **🇬🇧** Pressing a playing clip a second time queues it for stopping according to Ableton Live's **Global Quantization**, with pending-state LED feedback.
 
-## Scene Launch & Scene Hold Stop
+## Scene START/STOP
 
-**🇷🇺** Короткое нажатие запускает сцену с поведением, близким к штатному Ableton Scene Launch. Запуск применяется ко **всем обычным дорожкам проекта**, а не только к восьми дорожкам внутри текущего Session Ring. Пустой Clip Slot со Stop Button останавливает предыдущий клип; если Stop Button удалён, предыдущий клип продолжает играть.
+**🇷🇺** Нажатие Scene button управляет текущей сценой через **Global Quantization** Ableton Live. Если в сцене нет играющих клипов, нажатие ставит сцену на START. Если в сцене уже есть играющие клипы, нажатие ставит сцену на STOP. Повторное нажатие той же Scene button до границы квантования переключает pending действие между START и STOP.
 
-Удержание кнопки сцены ставит соответствующую сцену на остановку по **Global Quantization**. Обычный короткий Scene Launch при этом сохраняется.
+Scene Launch применяется ко **всем обычным дорожкам проекта**, а не только к восьми дорожкам внутри текущего Session Ring. Пустой Clip Slot со Stop Button останавливает предыдущий клип; если Stop Button удалён, предыдущий клип продолжает играть.
 
-**🇬🇧** A short press launches the scene across **all regular project tracks**, not only the eight tracks currently visible in the Session Ring. An empty Clip Slot with a Stop Button stops the previously playing clip; removing the Stop Button allows it to continue.
+**🇬🇧** Pressing a Scene button controls the current scene using Ableton Live's **Global Quantization**. If the scene has no playing clips, the press queues/starts Scene START. If the scene has playing clips, the press queues Scene STOP. Pressing the same Scene button again before the quantization boundary toggles the pending action between START and STOP.
 
-Holding a Scene Launch button queues the scene for stopping according to **Global Quantization**, while a short press keeps normal scene-launch behavior.
+Scene Launch applies across **all regular project tracks**, not only the eight tracks currently visible in the Session Ring. An empty Clip Slot with a Stop Button stops the previously playing clip; removing the Stop Button allows it to continue.
 
 ## Fixed Length Recording
 
@@ -49,7 +49,7 @@ Holding a Scene Launch button queues the scene for stopping according to **Globa
 **🇷🇺** В режиме **Solo** нажатие Clip Pad запускает последовательную запись двух частей на одной дорожке.
 
 - Если исходный слот пуст: записывается первый клип выбранной Fixed Length, затем автоматически записывается следующий слот, после чего воспроизведение возвращается к первому клипу.
-- Если исходный клип уже существует: он запускается с обычной квантованием, проигрывается один полный цикл, затем начинается запись следующего слота, после чего воспроизведение возвращается к исходному клипу.
+- Если исходный клип уже существует: он запускается с обычным квантованием, проигрывается один полный цикл, затем начинается запись следующего слота, после чего воспроизведение возвращается к исходному клипу.
 - Запись всегда идёт в **следующую сцену той же дорожки**.
 - Если следующего слота нет или он уже занят, последовательность безопасно отменяется.
 - Solo и Arm используют одну общую настройку Fixed Length.
@@ -87,14 +87,22 @@ This is designed for quickly building two related performance sections — for e
 ```text
 Mixer
 ↓
-Pan
+Arm
 ↓
-Fixed Length
+Fixed Length selection
 ```
 
-Повторное нажатие `Pan` закрывает режим и возвращает Session View. Фейдеры Pan в этом режиме отключены, чтобы случайное касание не изменило микс.
+```text
+Mixer
+↓
+Solo
+↓
+Fixed Length selection + Sequential Record
+```
 
-Press `Pan` again to leave Fixed Length mode and return to Session View. Pan faders are disabled while this mode is active to avoid accidental mix changes.
+Arm и Solo используют одну общую настройку Fixed Length. В режиме `Arm` она применяется для обычной Fixed Length записи, а в режиме `Solo` та же выбранная длина используется вместе с Sequential Record. `Pan` не является режимом Fixed Length.
+
+Arm and Solo use the same shared Fixed Length value. In `Arm` mode it is used for normal Fixed Length recording, while in `Solo` mode the same selection is used together with Sequential Record. `Pan` is not a Fixed Length mode.
 
 ## Sequential Record
 
@@ -110,18 +118,25 @@ Sequential Record использует ту же выбранную Fixed Length
 
 Sequential Record uses the same selected Fixed Length value as normal recording in Arm mode.
 
+Arm и Solo используют одну общую настройку Fixed Length: изменение длины в любом из этих режимов обновляет общее значение.
+
+Arm and Solo share one Fixed Length setting: changing the length in either mode updates the same shared value.
+
 ## Hold-time configuration
 
-Время удержания для Scene Stop и Clip Delete можно изменить в:
+Этот раздел относится только ко времени удержания для Clip Delete.
 
-The hold time for Scene Stop and Clip Delete can be changed in:
+This section documents only the hold time for Clip Delete.
+
+Время удержания для Clip Delete можно изменить в:
+
+The hold time for Clip Delete can be changed in:
 
 ```text
-src/Launchpad_X_performance/__init__.py
+src/Launchpad_X_performance/clip_delete.py
 ```
 
 ```python
-SCENE_HOLD_SECONDS = 0.7
 CLIP_DELETE_HOLD_SECONDS = 0.7
 ```
 
@@ -239,7 +254,8 @@ uninstall_windows.bat
 - Scene Launch теперь сохраняет семантику Stop Button в пустых слотах: Stop Button останавливает предыдущий клип, удалённый Stop Button позволяет ему продолжать играть.
 - Используется абсолютный индекс сцены при вертикальном смещении Session Ring.
 - Drum Mode сохраняет правильную привязку к Live Track после изменения структуры проекта.
-- Сохранены квантованные queued launch/stop и long-press performance controls.
+- Scene buttons теперь используют press-based квантованную START/STOP state machine без отдельного hold-жеста для остановки сцены.
+- Сохранены квантованные queued launch/stop, Long Press Clip Delete, Mixer side long-press stop и Drum Mode clear long-press.
 
 ## 🇬🇧
 
@@ -257,7 +273,8 @@ Major update to the Launchpad X Performance live-performance workflow.
 - Scene Launch now preserves empty-slot Stop Button semantics: a Stop Button stops the previous clip, while a removed Stop Button allows it to continue.
 - Absolute scene indexing is used when the Session Ring is vertically offset.
 - Drum Mode stays attached to the correct Live Track after project structure changes.
-- Quantized queued launch/stop and long-press performance controls remain preserved.
+- Scene buttons now use a press-based quantized START/STOP state machine with no separate hold gesture for scene stopping.
+- Quantized queued launch/stop, Long Press Clip Delete, Mixer side long-press stop, and Drum Mode clear long-press remain preserved.
 
 ---
 
