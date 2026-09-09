@@ -12,3 +12,8 @@ fix_*.command
 repair_*.command
 full_repair_*.command
 install_arm_*.command
+
+# Reverse engineering / local research
+reference_scripts/
+*_disassembly.txt
+inspect_session_recording.command

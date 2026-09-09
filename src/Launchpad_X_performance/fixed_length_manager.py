@@ -1,51 +1,23 @@
 from __future__ import absolute_import, print_function, unicode_literals
 
-
 class PerformanceFixedLengthManager(object):
-    """
-    Следит за штатными режимами Launchpad X.
-
-    Fixed Length включён только при:
-    Main Mode = Session
-    Session Mode = Mixer
-    Mixer Mode = Arm
-
-    Два ряда используются для выбора длины записи.
-    Нижний ряд продолжает управлять Arm дорожек.
-    """
-
     def __init__(self, surface, component):
         self._surface = surface
         self._component = component
-
-        self._surface._mixer_modes.add_selected_mode_listener(
-            self._on_mode_changed
-        )
-        self._surface._session_modes.add_selected_mode_listener(
-            self._on_mode_changed
-        )
-        self._surface._main_modes.add_selected_mode_listener(
-            self._on_mode_changed
-        )
-
+        self._surface._mixer_modes.add_selected_mode_listener(self._on_mode_changed)
+        self._surface._session_modes.add_selected_mode_listener(self._on_mode_changed)
+        self._surface._main_modes.add_selected_mode_listener(self._on_mode_changed)
         self._refresh()
-
     def _on_mode_changed(self, *_):
         self._refresh()
-
     def _overlay_should_be_enabled(self):
         return (
             self._surface._main_modes.selected_mode == "session"
             and self._surface._session_modes.selected_mode == "mixer"
-            and self._surface._mixer_modes.selected_mode == "arm"
+            and self._surface._mixer_modes.selected_mode in ("arm", "solo")
         )
-
     def _refresh(self):
-        overlay_enabled = self._overlay_should_be_enabled()
-
-        if overlay_enabled:
-            # Возвращаем сетку из возможного Faders layout
-            # в обычный Session layout.
+        enabled = self._overlay_should_be_enabled()
+        if enabled:
             self._surface._session_layout_mode()
-
-        self._component.set_enabled(overlay_enabled)
+        self._component.set_enabled(enabled)
